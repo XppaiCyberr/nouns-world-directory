@@ -1,5 +1,9 @@
 // Nouns.world — Filterable Directory (Google Sheets)
-// New updates implemented per your notes.
+// v6 updates:
+// a) Intro paragraph under header (replaces "Explore Nounish Projects").
+// b) Disclaimer moved to the right of the result count line.
+// c) Optional animated doodles component (desktop only, off by default).
+// d) Logo best-practice: new "Logo URL" preferred; fallback to legacy "Logo" or /logos/{slug}.png.
 
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
@@ -11,13 +15,15 @@ const CONFIG = {
     title: "Name (with url hyperlinked)",
     link: "URL",
     description: "Description",
-    categories: "Category",       // legacy (not shown), still searchable
-    mainTag: "Main tag",          // NEW: displayed as chips
-    hiddenTags: "Hidden tags",    // NEW: search-only keywords
-    image: "Logo"
+    categories: "Category",     // legacy (searchable)
+    mainTag: "Main tag",        // shown as chips
+    hiddenTags: "Hidden tags",  // search-only
+    logoUrl: "Logo URL",        // NEW preferred
+    image: "Logo"               // legacy fallback
   },
   site: {
-    openLinksInNewTab: true
+    openLinksInNewTab: true,
+    enableDoodles: false // set true to show doodles on desktop
   }
 };
 
@@ -32,7 +38,7 @@ const parseList = (val) =>
 
 const pastelFromText = (text) => {
   let h = 0;
-  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) % 360;
+  for (let i = 0; i < (text || "").length; i++) h = (h * 31 + text.charCodeAt(i)) % 360;
   return `hsl(${h} 70% 92%)`;
 };
 
@@ -57,7 +63,7 @@ function Disclaimer() {
     <div className="flex items-center gap-2 text-xs text-neutral-600">
       <span className="font-medium">Disclaimer</span>
       <div
-        className="relative group"
+        className="relative"
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
       >
@@ -82,11 +88,32 @@ function Disclaimer() {
   );
 }
 
+function Doodles() {
+  if (!CONFIG.site.enableDoodles) return null;
+  return (
+    <div className="pointer-events-none fixed inset-0 hidden lg:block" aria-hidden="true">
+      {/* Left doodle */}
+      <div className="absolute left-2 top-24 animate-[floaty_6s_ease-in-out_infinite] opacity-30">
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+          <circle cx="40" cy="40" r="38" stroke="#000" strokeDasharray="6 6" />
+        </svg>
+      </div>
+      {/* Right doodle */}
+      <div className="absolute right-4 bottom-24 opacity-30">
+        <svg width="90" height="90" viewBox="0 0 100 100" fill="none" className="animate-[spin-slow_30s_linear_infinite]">
+          <rect x="10" y="10" width="80" height="80" rx="14" stroke="#000" strokeDasharray="8 8" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function Header() {
   return (
     <div className="sticky top-0 z-10 -mx-4 border-b bg-white/90 px-4 py-3 backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
+          {/* Logo space (uses /nouns-world-globe.gif if present in public/) */}
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-neutral-100">
             <img
               src="/nouns-world-globe.gif"
@@ -132,7 +159,11 @@ export default function NounsDirectory() {
           const mainTagList = parseList(row[CONFIG.COLUMNS.mainTag]);
           const mainTag = mainTagList[0] || "";
           const hidden = parseList(row[CONFIG.COLUMNS.hiddenTags]);
-          const image = (row[CONFIG.COLUMNS.image] || "").toString().trim();
+          const logoUrl = (row[CONFIG.COLUMNS.logoUrl] || "").toString().trim();
+          const legacyLogo = (row[CONFIG.COLUMNS.image] || "").toString().trim();
+          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+
+          const image = logoUrl || legacyLogo || derivedLogo;
 
           return {
             key: `${slug(title)}-${i}`,
@@ -141,7 +172,8 @@ export default function NounsDirectory() {
             description,
             mainTag,
             hiddenTags: hidden,
-            legacyCategories
+            legacyCategories,
+            image
           };
         });
         setRows(data);
@@ -151,6 +183,7 @@ export default function NounsDirectory() {
     });
   }, []);
 
+  // MAIN TAGS for chips
   const allMainTags = useMemo(() => {
     const set = new Set();
     rows.forEach((r) => { if (r.mainTag) set.add(r.mainTag); });
@@ -191,13 +224,18 @@ export default function NounsDirectory() {
   return (
     <div className="mx-auto max-w-6xl px-4 pb-24">
       <Header />
+      <Doodles />
 
-      <div className="mt-4">
-        <Disclaimer />
-      </div>
+      {/* Intro paragraph */}
+      <p className="mt-4 text-sm leading-relaxed text-neutral-700">
+        Nouns is a decentralized project and the community members are the driving force behind its growth.
+        They continually expand and maintain the project with new technology, tools, and resources.
+        Explore different areas of Nouns through the categories below:
+      </p>
 
+      {/* Search + Clear */}
       <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="text-base font-semibold md:text-lg">Explore Nounish Projects</div>
+        <div className="sr-only">Explore Nounish Projects</div>
         <div className="flex flex-wrap items-center gap-2">
           <input
             value={query}
@@ -217,6 +255,7 @@ export default function NounsDirectory() {
         </div>
       </div>
 
+      {/* Main Tag chips — stacked grid */}
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {allMainTags.map((t) => (
           <Pill
@@ -229,8 +268,15 @@ export default function NounsDirectory() {
         ))}
       </div>
 
-      <div className="mt-2 text-xs text-neutral-600">{filtered.length} shown</div>
+      {/* Count + Disclaimer on one row */}
+      <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
+        <div>{filtered.length} shown</div>
+        <div className="ml-4">
+          <Disclaimer />
+        </div>
+      </div>
 
+      {/* Cards */}
       {loading ? (
         <div className="mt-6 text-sm text-neutral-600">Loading…</div>
       ) : (
@@ -240,8 +286,20 @@ export default function NounsDirectory() {
               key={r.key}
               className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
             >
+              {/* Header: 30×30 logo + Title */}
               <div className="flex items-center gap-3">
-                <div className="h-[30px] w-[30px] shrink-0 overflow-hidden rounded bg-neutral-100"></div>
+                <div className="h-[30px] w-[30px] shrink-0 overflow-hidden rounded bg-neutral-100">
+                  {r.image ? (
+                    <img
+                      src={r.image}
+                      alt=""
+                      width="30"
+                      height="30"
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : null}
+                </div>
                 <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
                   {r.link ? (
                     <a
@@ -258,6 +316,7 @@ export default function NounsDirectory() {
                 </h3>
               </div>
 
+              {/* Main tag (small badge) */}
               {r.mainTag && (
                 <div className="mt-2">
                   <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
@@ -266,8 +325,10 @@ export default function NounsDirectory() {
                 </div>
               )}
 
+              {/* Description */}
               <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
 
+              {/* Footer: Explore -> aligned right & at bottom */}
               {r.link && (
                 <div className="mt-auto pt-4 flex justify-end">
                   <a
