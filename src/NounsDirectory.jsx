@@ -1,13 +1,10 @@
 // Nouns.world — Filterable Directory (Google Sheets)
-// v15: Restore static left/right gutters with repeating images (2 left, 3 right).
-//      Semi-random vertical positions & slight horizontal jitter per gutter. No animation.
-//      Always behind UI; cards/chips remain fully opaque and on top.
-//      Visible on md+ screens. Uses deterministic seed so layout feels intentional & static.
-//
-// Required assets (transparent GIFs):
-// /public/images/resource-gif-1.gif ... resource-gif-5.gif
-//
-// Keeps: full-width black header; border-2 chips; black logo fallback; mobile dropdown filters; tags; disclaimer.
+// v17:
+// - Static, FIXED gutters (2 left sequence, 3 right sequence). They do not scroll with the page.
+// - Visible on mobile now, and they never extend the page height.
+// - Always behind the UI (cards/chips are opaque and above).
+// - Slight horizontal jitter and size variance; deterministic seed so layout is stable.
+// - Keeps: black header, border-2 chips, black logo fallback, mobile dropdown filters, tags, disclaimer.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
@@ -28,18 +25,17 @@ const CONFIG = {
   site: {
     openLinksInNewTab: true,
     stickyHeader: false,
-    gutters: {
-      minY: 140,        // start below header
-      bottomPad: 200,   // keep off the footer
-      stepMin: 360,     // vertical spacing min
-      stepMax: 480,     // vertical spacing max
-      sizeMin: 88,      // px
-      sizeMax: 132,     // px
-      jitterX: 24,      // horizontal jitter within gutter
-      opacity: 0.2,     // subtle
-      seed: 1337,       // deterministic
-      gutterMinPx: 120, // if gutter narrower than this, hide art
-      showBreakpointPx: 768 // md+ only
+    fixedGutters: {
+      // Viewport-relative layout (position: fixed)
+      yPercentsLeft:  [10, 28, 46, 64, 82],   // % down the viewport
+      yPercentsRight: [16, 34, 52, 70, 88],
+      sizeMin: 84,       // px
+      sizeMax: 132,      // px
+      jitterX: 18,       // px horizontal jitter within gutter
+      opacity: 0.18,     // subtle
+      seed: 777,         // deterministic stable layout
+      minGutterPx: 48,   // if gutter too thin, hug the edge (even offscreen slightly)
+      marginX: 12        // padding from edges
     }
   }
 };
@@ -78,7 +74,7 @@ function resolveColumns(fields, candidatesMap) {
   };
 }
 
-// Seeded PRNG for stable layout
+// Seeded PRNG
 function mulberry32(a) {
   return function() {
     let t = (a += 0x6D2B79F5);
@@ -88,98 +84,78 @@ function mulberry32(a) {
   };
 }
 
-// Static repeating gutters
-function SideGutterRepeat({ containerRef }) {
-  const [leftSpots, setLeftSpots] = useState([]);
-  const [rightSpots, setRightSpots] = useState([]);
-  const [height, setHeight] = useState(0);
+// Fixed-position gutters (do not scroll)
+function FixedGutterArt({ containerRef }) {
+  const [left, setLeft] = useState([]);
+  const [right, setRight] = useState([]);
 
   useEffect(() => {
     function regen() {
       const el = containerRef.current;
-      if (!el) return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (!el || !vw || !vh) return;
 
       const {
-        minY, bottomPad, stepMin, stepMax, sizeMin, sizeMax, jitterX,
-        opacity, seed, gutterMinPx, showBreakpointPx
-      } = CONFIG.site.gutters;
+        yPercentsLeft, yPercentsRight, sizeMin, sizeMax,
+        jitterX, opacity, seed, minGutterPx, marginX
+      } = CONFIG.site.fixedGutters;
 
-      const vw = window.innerWidth;
-      if (vw < showBreakpointPx) {
-        setLeftSpots([]); setRightSpots([]); setHeight(0); return;
-      }
-
-      const docHeight = Math.max(
-        document.body.scrollHeight,
-        document.documentElement.scrollHeight,
-        el.scrollHeight
-      );
-
-      // available gutter widths on each side of the centered container
-      const containerWidth = el.getBoundingClientRect().width;
+      const rect = el.getBoundingClientRect();
+      const containerWidth = rect.width;
       const gutterWidth = Math.max(0, (vw - containerWidth) / 2);
-      if (gutterWidth < gutterMinPx) {
-        setLeftSpots([]); setRightSpots([]); setHeight(docHeight); return;
+
+      // Left gutter X bounds
+      let leftMinX = marginX;
+      let leftMaxX = gutterWidth - marginX;
+      // Right gutter X bounds
+      let rightMinX = vw - gutterWidth + marginX;
+      let rightMaxX = vw - marginX;
+
+      // If gutters are too thin, allow hugging the edges (even offscreen by a bit)
+      if (gutterWidth < minGutterPx) {
+        leftMinX = -sizeMax * 0.35;
+        leftMaxX = Math.max(marginX, gutterWidth) + sizeMax * 0.15;
+        rightMinX = vw - Math.max(marginX, gutterWidth) - sizeMax * 0.15;
+        rightMaxX = vw + sizeMax * 0.35;
       }
 
-      const leftMinX = 16;
-      const leftMaxX = Math.max(16, gutterWidth - sizeMax - 16);
-      const rightMinX = vw - gutterWidth + 16;
-      const rightMaxX = vw - 16 - sizeMax;
+      const randL = mulberry32(seed + Math.floor(vw) + 101);
+      const randR = mulberry32(seed + Math.floor(vw) + 331);
 
-      const randL = mulberry32(seed + 11);
-      const randR = mulberry32(seed + 29);
-
-      // Build left spots (2-image sequence)
-      const L = [];
-      let y = minY;
-      let idx = 0;
-      while (y < docHeight - bottomPad) {
+      const L = yPercentsLeft.map((p, i) => {
         const size = Math.floor(sizeMin + randL() * (sizeMax - sizeMin));
         const baseX = leftMinX + randL() * (leftMaxX - leftMinX);
         const jitter = (randL() - 0.5) * jitterX * 2;
-        const x = Math.max(leftMinX, Math.min(leftMaxX, baseX + jitter));
-        L.push({ x, y, size, file: RES_LEFT[idx % RES_LEFT.length], opacity });
-        y += Math.floor(stepMin + randL() * (stepMax - stepMin));
-        idx++;
-      }
+        const x = Math.max(Math.min(baseX + jitter, leftMaxX - size / 4), leftMinX - size / 4);
+        const y = Math.round((p / 100) * vh - size / 2);
+        const file = RES_LEFT[i % RES_LEFT.length];
+        return { x, y, size, file, opacity };
+      });
 
-      // Build right spots (3-image sequence)
-      const R = [];
-      y = minY + Math.floor((stepMin + stepMax) / 4); // slight phase offset
-      idx = 0;
-      while (y < docHeight - bottomPad) {
+      const R = yPercentsRight.map((p, i) => {
         const size = Math.floor(sizeMin + randR() * (sizeMax - sizeMin));
         const baseX = rightMinX + randR() * (rightMaxX - rightMinX);
         const jitter = (randR() - 0.5) * jitterX * 2;
-        const x = Math.max(rightMinX, Math.min(rightMaxX, baseX + jitter));
-        R.push({ x, y, size, file: RES_RIGHT[idx % RES_RIGHT.length], opacity });
-        y += Math.floor(stepMin + randR() * (stepMax - stepMin));
-        idx++;
-      }
+        const x = Math.max(Math.min(baseX + jitter, rightMaxX - size / 4), rightMinX - size / 4);
+        const y = Math.round((p / 100) * vh - size / 2);
+        const file = RES_RIGHT[i % RES_RIGHT.length];
+        return { x, y, size, file, opacity };
+      });
 
-      setHeight(docHeight);
-      setLeftSpots(L);
-      setRightSpots(R);
+      setLeft(L);
+      setRight(R);
     }
-
     regen();
     window.addEventListener("resize", regen);
     return () => window.removeEventListener("resize", regen);
   }, [containerRef]);
 
-  if (!leftSpots.length && !rightSpots.length) return null;
-
   return (
-    <div
-      className="pointer-events-none absolute inset-0 z-0 hidden md:block"
-      style={{ height }}
-      aria-hidden="true"
-    >
-      {/* Left gutter */}
-      {leftSpots.map((s, i) => (
+    <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
+      {left.map((s, i) => (
         <img
-          key={"l" + i}
+          key={"lfx" + i}
           src={s.file}
           alt=""
           loading="lazy"
@@ -187,10 +163,9 @@ function SideGutterRepeat({ containerRef }) {
           style={{ left: s.x + "px", top: s.y + "px", width: s.size + "px", height: s.size + "px", opacity: s.opacity }}
         />
       ))}
-      {/* Right gutter */}
-      {rightSpots.map((s, i) => (
+      {right.map((s, i) => (
         <img
-          key={"r" + i}
+          key={"rfx" + i}
           src={s.file}
           alt=""
           loading="lazy"
@@ -441,159 +416,157 @@ export default function NounsDirectory() {
 
   return (
     <>
-      {/* Full-width header */}
-      <div className="relative">
-        <Header />
-        {/* The gutter art container needs to sit in a full-width relative wrapper */}
-        <div className="relative">
-          <div ref={containerRef} className="mx-auto max-w-6xl px-4">
-            {/* Static gutter art behind the centered content */}
-            <SideGutterRepeat containerRef={containerRef} />
-            {/* Opaque content above */}
-            <div className="relative z-10 pb-24">
-              {/* Intro paragraph */}
-              <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
-                <strong>Nouns</strong> is a <strong>decentralized</strong> project and the <strong>community</strong> is the driving force behind its growth.
-                Builders continually expand the ecosystem with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
-                Explore different areas of Nouns through the <strong>categories below</strong>.
-              </p>
+      {/* Fixed gutters behind everything */}
+      <FixedGutterArt containerRef={containerRef} />
 
-              {/* Search + Clear */}
-              <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="sr-only">Explore Nounish Projects</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search resources…"
-                    className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
-                    aria-label="Search"
-                  />
-                  {selectedTags.length > 0 && (
-                    <button
-                      onClick={clearFilters}
-                      className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
-                    >
-                      Clear filters
-                    </button>
-                  )}
-                </div>
-              </div>
+      {/* Full-width header (on top) */}
+      <Header />
 
-              {/* Mobile dropdown filters */}
-              <div className="mt-3 md:hidden">
-                <MobileFilters
-                  tags={allFilterTags}
-                  selected={selectedTags}
-                  onToggle={toggleTag}
-                  onClear={clearFilters}
-                />
-              </div>
+      {/* Centered content */}
+      <div ref={containerRef} className="relative mx-auto max-w-6xl px-4">
+        {/* Opaque content above fixed art */}
+        <div className="relative z-10 pb-24">
+          {/* Intro paragraph */}
+          <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
+            <strong>Nouns</strong> is a <strong>decentralized</strong> project and the <strong>community</strong> is the driving force behind its growth.
+            Builders continually expand the ecosystem with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
+            Explore different areas of Nouns through the <strong>categories below</strong>.
+          </p>
 
-              {/* Desktop/tablet chip grid */}
-              <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
-                {allFilterTags.map((t) => (
-                  <Pill
-                    key={t}
-                    selected={selectedTags.some((x) => slug(x) === slug(t))}
-                    onClick={() => toggleTag(t)}
-                  >
-                    {t}
-                  </Pill>
-                ))}
-              </div>
-
-              {/* Count + Disclaimer */}
-              <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
-                <div className="bg-white/90 px-1">{filtered.length} shown</div>
-                <div className="ml-4">
-                  <Disclaimer />
-                </div>
-              </div>
-
-              {/* Cards */}
-              {loading ? (
-                <div className="mt-6 text-sm text-neutral-600">Loading…</div>
-              ) : (
-                <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {filtered.map((r) => (
-                    <article
-                      key={r.key}
-                      className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
-                    >
-                      {/* Header: logo + Title */}
-                      <div className="flex items-center gap-3">
-                        <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
-                          {r.image ? (
-                            <img
-                              src={r.image}
-                              alt=""
-                              width="30"
-                              height="30"
-                              loading="lazy"
-                              className="h-full w-full object-cover"
-                              onError={(e) => {
-                                e.currentTarget.remove();
-                                const p = e.currentTarget.parentElement;
-                                p && p.classList.remove("bg-neutral-100");
-                                p && p.classList.add("bg-black");
-                              }}
-                            />
-                          ) : null}
-                        </div>
-                        <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
-                          {r.link ? (
-                            <a
-                              href={r.link}
-                              target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
-                              rel="noreferrer noopener"
-                              className="hover:underline"
-                            >
-                              {r.title}
-                            </a>
-                          ) : (
-                            r.title
-                          )}
-                        </h3>
-                      </div>
-
-                      {/* Description */}
-                      <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
-
-                      {/* Tags under description */}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {r.mainTag ? (
-                          <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
-                            {r.mainTag}
-                          </span>
-                        ) : (
-                          (r.legacyCategories || []).slice(0, 3).map((c) => (
-                            <span key={c} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
-                              {c}
-                            </span>
-                          ))
-                        )}
-                      </div>
-
-                      {/* Footer: Explore -> aligned right & at bottom */}
-                      {r.link && (
-                        <div className="mt-auto pt-4 flex justify-end">
-                          <a
-                            href={r.link}
-                            target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
-                            rel="noreferrer noopener"
-                            className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
-                          >
-                            Explore →
-                          </a>
-                        </div>
-                      )}
-                    </article>
-                  ))}
-                </div>
+          {/* Search + Clear */}
+          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="sr-only">Explore Nounish Projects</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search resources…"
+                className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
+                aria-label="Search"
+              />
+              {selectedTags.length > 0 && (
+                <button
+                  onClick={clearFilters}
+                  className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
+                >
+                  Clear filters
+                </button>
               )}
             </div>
           </div>
+
+          {/* Mobile dropdown filters */}
+          <div className="mt-3 md:hidden">
+            <MobileFilters
+              tags={allFilterTags}
+              selected={selectedTags}
+              onToggle={toggleTag}
+              onClear={clearFilters}
+            />
+          </div>
+
+          {/* Desktop/tablet chip grid */}
+          <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
+            {allFilterTags.map((t) => (
+              <Pill
+                key={t}
+                selected={selectedTags.some((x) => slug(x) === slug(t))}
+                onClick={() => toggleTag(t)}
+              >
+                {t}
+              </Pill>
+            ))}
+          </div>
+
+          {/* Count + Disclaimer */}
+          <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
+            <div className="bg-white/90 px-1">{filtered.length} shown</div>
+            <div className="ml-4">
+              <Disclaimer />
+            </div>
+          </div>
+
+          {/* Cards */}
+          {loading ? (
+            <div className="mt-6 text-sm text-neutral-600">Loading…</div>
+          ) : (
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((r) => (
+                <article
+                  key={r.key}
+                  className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+                >
+                  {/* Header: logo + Title */}
+                  <div className="flex items-center gap-3">
+                    <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
+                      {r.image ? (
+                        <img
+                          src={r.image}
+                          alt=""
+                          width="30"
+                          height="30"
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.remove();
+                            const p = e.currentTarget.parentElement;
+                            p && p.classList.remove("bg-neutral-100");
+                            p && p.classList.add("bg-black");
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                    <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
+                      {r.link ? (
+                        <a
+                          href={r.link}
+                          target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
+                          rel="noreferrer noopener"
+                          className="hover:underline"
+                        >
+                          {r.title}
+                        </a>
+                      ) : (
+                        r.title
+                      )}
+                    </h3>
+                  </div>
+
+                  {/* Description */}
+                  <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
+
+                  {/* Tags under description */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {r.mainTag ? (
+                      <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
+                        {r.mainTag}
+                      </span>
+                    ) : (
+                      (r.legacyCategories || []).slice(0, 3).map((c) => (
+                        <span key={c} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
+                          {c}
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Footer: Explore -> aligned right & at bottom */}
+                  {r.link && (
+                    <div className="mt-auto pt-4 flex justify-end">
+                      <a
+                        href={r.link}
+                        target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
+                        rel="noreferrer noopener"
+                        className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
+                      >
+                        Explore →
+                      </a>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>

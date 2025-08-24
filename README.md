@@ -2,14 +2,14 @@
 
 Filterable directory pulling live data from a published Google Sheet.
 
-## v15
-- **Static repeating gutters** (md+): Left uses a 2-image sequence, right uses a 3-image sequence.
-- Semi-random positions: vertical steps between 360–480px with slight horizontal jitter; sizes 88–132px.
-- No animation; sits behind the UI. If overlap occurs on smaller displays, cards/chips render above.
-- Keeps: full-width black header, border-2 chips, black logo fallback, mobile dropdown filters, tags under description, disclaimer.
+## v17
+- **Fixed gutters**: 2-image cycle on the left, 3-image cycle on the right. These logos are `position: fixed` so they **do not scroll** with the page.
+- **Mobile enabled**: no more hiding on small screens. If the side gutters are narrow, the art hugs the edges (even slightly offscreen) to avoid covering content.
+- **No extra page height**: fixed layer doesn't affect layout. Cards/chips remain opaque and above the art.
+- Keeps: black header, border-2 chips, black logo fallback, mobile dropdown filters, tags under description, disclaimer.
 
-### Add your GIFs
-Put these in `public/images/`:
+### Assets
+Place in `public/images/`:
 ```
 resource-gif-1.gif
 resource-gif-2.gif
@@ -18,11 +18,11 @@ resource-gif-4.gif
 resource-gif-5.gif
 ```
 
-### Tuning
-Edit `CONFIG.site.gutters` in `src/NounsDirectory.jsx`:
-- `stepMin/stepMax` (vertical spacing), `sizeMin/sizeMax`, `jitterX`, `opacity`
-- `gutterMinPx` (hide if too narrow), `showBreakpointPx` (md breakpoint)
-- `seed` (deterministic layout)
+### Tuning (`CONFIG.site.fixedGutters`)
+- `yPercentsLeft` / `yPercentsRight`: where each logo sits vertically (percent of viewport height).
+- `sizeMin/sizeMax`, `jitterX`, `opacity`
+- `minGutterPx`, `marginX`
+- `seed` for deterministic layout
 
 ## Deploy
 - Build: `npm run build`
