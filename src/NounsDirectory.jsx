@@ -31,8 +31,9 @@ const CONFIG = {
       ],
       mobile: [
         { file: "/images/resource-gif-1.gif", leftVW: 2,  topVH: 22, size: 120 },
-        { file: "/images/resource-gif-3.gif", leftVW: 2, topVH: 38, size: 160 },
-        { file: "/images/resource-gif-4.gif", rightVW: 4, topVH: 72, size: 200 }
+        { file: "/images/resource-gif-4.gif", leftVW: 2, topVH: 38, size: 160 },
+        { file: "/images/resource-gif-4.gif", leftVW: 2, topVH: 66, size: 120 },
+        { file: "/images/resource-gif-3.gif", rightVW: 4, topVH: 72, size: 200 }
       ],
       breakpoint: 1024,
       opacity: 0.24
