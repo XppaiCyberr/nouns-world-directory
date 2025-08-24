@@ -1,3 +1,6 @@
+// v20: Fix Home URL (https://nouns.world), restore fixed viewport background art,
+// keep share button + favicon + OG tags, and fix JSX '&&' bug in card footer.
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 
@@ -17,6 +20,23 @@ const CONFIG = {
   site: {
     openLinksInNewTab: true,
     stickyHeader: false,
+    art: {
+      desktop: [
+        { file: "/images/resource-gif-1.gif", leftVW: 3,  topVH: 18, size: 220 },
+        { file: "/images/resource-gif-2.gif", rightVW: 4, topVH: 14, size: 170 },
+        { file: "/images/resource-gif-3.gif", leftVW: 6,  topVH: 68, size: 200 },
+        { file: "/images/resource-gif-4.gif", rightVW: 6, topVH: 60, size: 220 },
+        { file: "/images/resource-gif-5.gif", rightVW: 9, topVH: 36, size: 200 },
+        { file: "/images/resource-gif-2.gif", leftVW: 10, topVH: 92, size: 180 },
+        { file: "/images/resource-gif-3.gif", rightVW: 12, topVH: 88, size: 180 }
+      ],
+      mobile: [
+        { file: "/images/resource-gif-1.gif", leftVW: 2,  topVH: 22, size: 120 },
+        { file: "/images/resource-gif-3.gif", rightVW: 2, topVH: 38, size: 120 },
+        { file: "/images/resource-gif-4.gif", rightVW: 4, topVH: 72, size: 140 }
+      ],
+      breakpoint: 1024
+    }
   }
 };
 
@@ -28,6 +48,47 @@ const parseList = (val) =>
     .split(/[;,]/)
     .map((v) => v.trim())
     .filter(Boolean);
+
+function FixedViewportArt() {
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    const build = () => {
+      const set = window.innerWidth >= CONFIG.site.art.breakpoint ? CONFIG.site.art.desktop : CONFIG.site.art.mobile;
+      setItems(set);
+    };
+    build();
+    window.addEventListener("resize", build);
+    return () => window.removeEventListener("resize", build);
+  }, []);
+
+  if (!items.length) return null;
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
+      {items.map((it, i) => {
+        const style = {
+          width: it.size + "px",
+          height: it.size + "px",
+          top: it.topVH != null ? `calc(${it.topVH}vh - ${it.size/2}px)` : undefined,
+          left: it.leftVW != null ? `calc(${it.leftVW}vw - ${it.size/2}px)` : undefined,
+          right: it.rightVW != null ? `calc(${it.rightVW}vw - ${it.size/2}px)` : undefined,
+          opacity: 0.16
+        };
+        return (
+          <img
+            key={i}
+            src={it.file}
+            alt=""
+            loading="lazy"
+            className="absolute select-none"
+            style={style}
+          />
+        );
+      })}
+    </div>
+  );
+}
 
 function Disclaimer() {
   const [open, setOpen] = useState(false);
@@ -66,14 +127,11 @@ function Header() {
     const text = "Check out nouns community produced resources on Nouns.World.";
     const title = "Nouns.World / Resources";
 
-    // Web Share API if available
     if (navigator.share) {
       try {
         await navigator.share({ title, text, url });
         return;
-      } catch (e) {
-        // fall through to clipboard
-      }
+      } catch {}
     }
     try {
       await navigator.clipboard.writeText(url);
@@ -261,7 +319,6 @@ export default function NounsDirectory() {
     });
   }, []);
 
-  // Filter source (main tags if present, else categories)
   const allFilterTags = useMemo(() => {
     const set = new Set();
     if (useMainTagFilters) {
@@ -272,7 +329,6 @@ export default function NounsDirectory() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [rows, useMainTagFilters]);
 
-  // Apply filters + search
   const filtered = useMemo(() => {
     let out = rows;
     const slug = (s) => (s || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
@@ -312,152 +368,159 @@ export default function NounsDirectory() {
 
   return (
     <>
+      {/* Fixed viewport art at back */}
+      <FixedViewportArt />
+
       {/* Header */}
-      <Header />
+      <div className="relative z-30">
+        <Header />
+      </div>
 
-      {/* Centered content */}
+      {/* Content */}
       <div ref={containerRef} className="relative mx-auto max-w-6xl px-4">
-        {/* Intro paragraph */}
-        <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
-          <strong>Nouns</strong> is a <strong>decentralized</strong> project and the <strong>community</strong> is the driving force behind its growth.
-          Builders continually expand the ecosystem with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
-          Explore different areas of Nouns through the <strong>categories below</strong>.
-        </p>
+        <div className="relative z-10 pb-24">
+          {/* Intro paragraph */}
+          <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
+            <strong>Nouns</strong> is a <strong>decentralized</strong> project and the <strong>community</strong> is the driving force behind its growth.
+            Builders continually expand the ecosystem with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
+            Explore different areas of Nouns through the <strong>categories below</strong>.
+          </p>
 
-        {/* Search + Clear */}
-        <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="sr-only">Explore Nounish Projects</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search resources…"
-              className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
-              aria-label="Search"
+          {/* Search + Clear */}
+          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="sr-only">Explore Nounish Projects</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search resources…"
+                className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
+                aria-label="Search"
+              />
+              {selectedTags.length > 0 && (
+                <button
+                  onClick={clearFilters}
+                  className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Mobile dropdown filters */}
+          <div className="mt-3 md:hidden">
+            <MobileFilters
+              tags={allFilterTags}
+              selected={selectedTags}
+              onToggle={toggleTag}
+              onClear={clearFilters}
             />
-            {selectedTags.length > 0 && (
-              <button
-                onClick={clearFilters}
-                className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
-              >
-                Clear filters
-              </button>
-            )}
           </div>
-        </div>
 
-        {/* Mobile dropdown filters */}
-        <div className="mt-3 md:hidden">
-          <MobileFilters
-            tags={allFilterTags}
-            selected={selectedTags}
-            onToggle={toggleTag}
-            onClear={clearFilters}
-          />
-        </div>
-
-        {/* Desktop/tablet chip grid */}
-        <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
-          {allFilterTags.map((t) => (
-            <Pill
-              key={t}
-              selected={selectedTags.some((x) => (x || '').toLowerCase() === (t || '').toLowerCase())}
-              onClick={() => toggleTag(t)}
-            >
-              {t}
-            </Pill>
-          ))}
-        </div>
-
-        {/* Count + Disclaimer */}
-        <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
-          <div className="bg-white/90 px-1">{filtered.length} shown</div>
-          <div className="ml-4">
-            <Disclaimer />
-          </div>
-        </div>
-
-        {/* Cards */}
-        {loading ? (
-          <div className="mt-6 text-sm text-neutral-600">Loading…</div>
-        ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((r) => (
-              <article
-                key={r.key}
-                className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+          {/* Desktop filters */}
+          <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
+            {allFilterTags.map((t) => (
+              <Pill
+                key={t}
+                selected={selectedTags.some((x) => slug(x) === slug(t))}
+                onClick={() => toggleTag(t)}
               >
-                {/* Header: logo + Title */}
-                <div className="flex items-center gap-3">
-                  <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
-                    {r.image ? (
-                      <img
-                        src={r.image}
-                        alt=""
-                        width="30"
-                        height="30"
-                        loading="lazy"
-                        className="h-full w-full object-cover"
-                        onError={(e) => {
-                          e.currentTarget.remove();
-                          const p = e.currentTarget.parentElement;
-                          p && p.classList.remove("bg-neutral-100");
-                          p && p.classList.add("bg-black");
-                        }}
-                      />
-                    ) : null}
+                {t}
+              </Pill>
+            ))}
+          </div>
+
+          {/* Count + Disclaimer */}
+          <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
+            <div className="bg-white/90 px-1">{filtered.length} shown</div>
+            <div className="ml-4">
+              <Disclaimer />
+            </div>
+          </div>
+
+          {/* Cards */}
+          {loading ? (
+            <div className="mt-6 text-sm text-neutral-600">Loading…</div>
+          ) : (
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((r) => (
+                <article
+                  key={r.key}
+                  className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+                >
+                  {/* Header: logo + Title */}
+                  <div className="flex items-center gap-3">
+                    <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
+                      {r.image ? (
+                        <img
+                          src={r.image}
+                          alt=""
+                          width="30"
+                          height="30"
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.remove();
+                            const p = e.currentTarget.parentElement;
+                            p && p.classList.remove("bg-neutral-100");
+                            p && p.classList.add("bg-black");
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                    <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
+                      {r.link ? (
+                        <a
+                          href={r.link}
+                          target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
+                          rel="noreferrer noopener"
+                          className="hover:underline"
+                        >
+                          {r.title}
+                        </a>
+                      ) : (
+                        r.title
+                      )}
+                    </h3>
                   </div>
-                  <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
-                    {r.link ? (
+
+                  {/* Description */}
+                  <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
+
+                  {/* Tags under description */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {r.mainTag ? (
+                      <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
+                        {r.mainTag}
+                      </span>
+                    ) : (
+                      (r.legacyCategories || []).slice(0, 3).map((c) => (
+                        <span key={c} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
+                          {c}
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Footer: Explore -> aligned right & at bottom */}
+                  {r.link && (
+                    <div className="mt-auto pt-4 flex justify-end">
                       <a
                         href={r.link}
                         target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
                         rel="noreferrer noopener"
-                        className="hover:underline"
+                        className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
                       >
-                        {r.title}
+                        Explore →
                       </a>
-                    ) : (
-                      r.title
-                    )}
-                  </h3>
-                </div>
-
-                {/* Description */}
-                <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
-
-                {/* Tags under description */}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {r.mainTag ? (
-                    <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
-                      {r.mainTag}
-                    </span>
-                  ) : (
-                    (r.legacyCategories || []).slice(0, 3).map((c) => (
-                      <span key={c} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
-                        {c}
-                      </span>
-                    ))
+                    </div>
                   )}
-                </div>
-
-                {/* Footer: Explore -> aligned right & at bottom */}
-                {r.link and (
-                  <div className="mt-auto pt-4 flex justify-end">
-                    <a
-                      href={r.link}
-                      target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
-                      rel="noreferrer noopener"
-                      className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
-                    >
-                      Explore →
-                    </a>
-                  </div>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
