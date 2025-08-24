@@ -39,7 +39,7 @@ const CONFIG = {
         { file: "/images/resource-gif-6.gif", rightVW: 18, topVH: 60, size: 200 }
       ],
       breakpoint: 1024,
-      opacity: 0.44
+      opacity: 0.34
     }
   }
 };
