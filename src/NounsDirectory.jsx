@@ -24,7 +24,7 @@ const CONFIG = {
         { file: "/images/resource-gif-1.gif", leftVW: 3,  topVH: 18, size: 220 },
         { file: "/images/resource-gif-2.gif", rightVW: 4, topVH: 14, size: 170 },
         { file: "/images/resource-gif-3.gif", leftVW: 6,  topVH: 68, size: 200 },
-        { file: "/images/resource-gif-4.gif", rightVW: 6, topVH: 60, size: 220 },
+        { file: "/images/resource-gif-4.gif", rightVW: 6, topVH: 60, size: 270 },
         { file: "/images/resource-gif-5.gif", rightVW: 9, topVH: 36, size: 200 },
         { file: "/images/resource-gif-2.gif", leftVW: 10, topVH: 92, size: 180 },
         { file: "/images/resource-gif-3.gif", rightVW: 12, topVH: 88, size: 180 }
@@ -32,7 +32,7 @@ const CONFIG = {
       mobile: [
         { file: "/images/resource-gif-1.gif", leftVW: 2,  topVH: 22, size: 120 },
         { file: "/images/resource-gif-3.gif", rightVW: 2, topVH: 38, size: 120 },
-        { file: "/images/resource-gif-4.gif", rightVW: 4, topVH: 72, size: 140 }
+        { file: "/images/resource-gif-4.gif", rightVW: 4, topVH: 72, size: 200 }
       ],
       breakpoint: 1024,
       opacity: 0.24
