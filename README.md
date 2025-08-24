@@ -2,17 +2,15 @@
 
 Filterable directory pulling live data from a published Google Sheet.
 
-## New columns
-- **Main tag** → visible chips
-- **Hidden tags** → search-only keywords
-- **Logo URL** → direct image URL (preferred). If blank, legacy **Logo** is used; else it will try `/logos/{slug(title)}.png`.
+## v7: Tag resilience
+- Auto-detects column names case-insensitively.
+- If no **Main tag** values exist, filters fall back to **Category** values.
+- Cards show **Main tag** if present, else up to 3 **Category** chips.
 
-## Local dev (optional)
-```bash
-npm install
-npm run dev
-```
+## Optional logos
+- Preferred: **Logo URL** (direct link to image).
+- Fallbacks: legacy **Logo** → `/logos/{slug(title)}.png`.
 
-## Deploy (Vercel/Netlify)
+## Deploy
 - Build: `npm run build`
 - Output: `dist`

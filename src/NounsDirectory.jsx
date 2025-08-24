@@ -1,9 +1,9 @@
 // Nouns.world — Filterable Directory (Google Sheets)
-// v6 updates:
-// a) Intro paragraph under header (replaces "Explore Nounish Projects").
-// b) Disclaimer moved to the right of the result count line.
-// c) Optional animated doodles component (desktop only, off by default).
-// d) Logo best-practice: new "Logo URL" preferred; fallback to legacy "Logo" or /logos/{slug}.png.
+// v7 fixes: resilient column detection + fallbacks so tags never disappear.
+// - Auto-detects column names case-insensitively (e.g., "Main tag" vs "Main Tag").
+// - If no Main tag values exist, filters fall back to legacy Category values.
+// - On each card, show Main tag if present; otherwise show up to 3 legacy Category chips.
+// - Keeps v6 features (intro, disclaimer on right, doodles opt-in, logos).
 
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
@@ -11,19 +11,20 @@ import Papa from "papaparse";
 const CONFIG = {
   SHEET_CSV_URL:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pub?gid=0&single=true&output=csv",
+  // Preferred logical names (we'll resolve actual header names dynamically):
   COLUMNS: {
-    title: "Name (with url hyperlinked)",
-    link: "URL",
-    description: "Description",
-    categories: "Category",     // legacy (searchable)
-    mainTag: "Main tag",        // shown as chips
-    hiddenTags: "Hidden tags",  // search-only
-    logoUrl: "Logo URL",        // NEW preferred
-    image: "Logo"               // legacy fallback
+    title: ["Name (with url hyperlinked)", "Name", "Title"],
+    link: ["URL", "Link"],
+    description: ["Description", "About"],
+    categories: ["Category", "Categories"],
+    mainTag: ["Main tag", "Main Tag", "Primary tag", "Main category", "Main Category"],
+    hiddenTags: ["Hidden tags", "Hidden Tags", "Search tags", "Search Keywords"],
+    logoUrl: ["Logo URL", "Logo url", "Image URL"],
+    image: ["Logo", "Image"]
   },
   site: {
     openLinksInNewTab: true,
-    enableDoodles: false // set true to show doodles on desktop
+    enableDoodles: false
   }
 };
 
@@ -92,13 +93,11 @@ function Doodles() {
   if (!CONFIG.site.enableDoodles) return null;
   return (
     <div className="pointer-events-none fixed inset-0 hidden lg:block" aria-hidden="true">
-      {/* Left doodle */}
       <div className="absolute left-2 top-24 animate-[floaty_6s_ease-in-out_infinite] opacity-30">
         <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
           <circle cx="40" cy="40" r="38" stroke="#000" strokeDasharray="6 6" />
         </svg>
       </div>
-      {/* Right doodle */}
       <div className="absolute right-4 bottom-24 opacity-30">
         <svg width="90" height="90" viewBox="0 0 100 100" fill="none" className="animate-[spin-slow_30s_linear_infinite]">
           <rect x="10" y="10" width="80" height="80" rx="14" stroke="#000" strokeDasharray="8 8" />
@@ -113,7 +112,6 @@ function Header() {
     <div className="sticky top-0 z-10 -mx-4 border-b bg-white/90 px-4 py-3 backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          {/* Logo space (uses /nouns-world-globe.gif if present in public/) */}
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-neutral-100">
             <img
               src="/nouns-world-globe.gif"
@@ -137,10 +135,33 @@ function Header() {
   );
 }
 
+// Resolve header names case-insensitively based on candidates
+function resolveColumns(fields, candidatesMap) {
+  const lowerIndex = new Map(fields.map((f) => [f.toLowerCase().trim(), f]));
+  const pick = (arr) => {
+    for (const name of arr) {
+      const found = lowerIndex.get(String(name).toLowerCase());
+      if (found) return found;
+    }
+    return null;
+  };
+  return {
+    title: pick(candidatesMap.title),
+    link: pick(candidatesMap.link),
+    description: pick(candidatesMap.description),
+    categories: pick(candidatesMap.categories),
+    mainTag: pick(candidatesMap.mainTag),
+    hiddenTags: pick(candidatesMap.hiddenTags),
+    logoUrl: pick(candidatesMap.logoUrl),
+    image: pick(candidatesMap.image)
+  };
+}
+
 export default function NounsDirectory() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTags, setSelectedTags] = useState([]);
+  const [useMainTagFilters, setUseMainTagFilters] = useState(true);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -150,19 +171,23 @@ export default function NounsDirectory() {
       skipEmptyLines: true,
       complete: (res) => {
         const raw = res.data || [];
-        const data = raw.map((row, i) => {
-          const titleRaw = (row[CONFIG.COLUMNS.title] || "").toString().trim();
-          const link = (row[CONFIG.COLUMNS.link] || "").toString().trim();
-          const title = titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`);
-          const description = (row[CONFIG.COLUMNS.description] || "").toString().trim();
-          const legacyCategories = parseList(row[CONFIG.COLUMNS.categories]);
-          const mainTagList = parseList(row[CONFIG.COLUMNS.mainTag]);
-          const mainTag = mainTagList[0] || "";
-          const hidden = parseList(row[CONFIG.COLUMNS.hiddenTags]);
-          const logoUrl = (row[CONFIG.COLUMNS.logoUrl] || "").toString().trim();
-          const legacyLogo = (row[CONFIG.COLUMNS.image] || "").toString().trim();
-          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+        const fields = (res.meta && res.meta.fields) || Object.keys(raw[0] || {});
+        const cols = resolveColumns(fields, CONFIG.COLUMNS);
 
+        const data = raw.map((row, i) => {
+          const titleRaw = (cols.title && row[cols.title]) || "";
+          const link = (cols.link && row[cols.link]) || "";
+          const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
+          const description = String((cols.description && row[cols.description]) || "").trim();
+
+          const legacyCategories = parseList(cols.categories ? row[cols.categories] : "");
+          const mainTagList = parseList(cols.mainTag ? row[cols.mainTag] : "");
+          const mainTag = mainTagList[0] || "";
+          const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
+
+          const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
+          const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
+          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
           const image = logoUrl || legacyLogo || derivedLogo;
 
           return {
@@ -176,6 +201,10 @@ export default function NounsDirectory() {
             image
           };
         });
+
+        // If no rows have a mainTag, fall back to legacy categories for filters
+        const hasAnyMain = data.some((r) => !!r.mainTag);
+        setUseMainTagFilters(hasAnyMain);
         setRows(data);
         setLoading(false);
       },
@@ -183,18 +212,27 @@ export default function NounsDirectory() {
     });
   }, []);
 
-  // MAIN TAGS for chips
-  const allMainTags = useMemo(() => {
+  // Build filter list
+  const allFilterTags = useMemo(() => {
     const set = new Set();
-    rows.forEach((r) => { if (r.mainTag) set.add(r.mainTag); });
+    if (useMainTagFilters) {
+      rows.forEach((r) => { if (r.mainTag) set.add(r.mainTag); });
+    } else {
+      rows.forEach((r) => (r.legacyCategories || []).forEach((c) => set.add(c)));
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
+  }, [rows, useMainTagFilters]);
 
+  // Apply filters + search
   const filtered = useMemo(() => {
     let out = rows;
     if (selectedTags.length) {
       const wanted = new Set(selectedTags.map((t) => slug(t)));
-      out = out.filter((r) => r.mainTag && wanted.has(slug(r.mainTag)));
+      if (useMainTagFilters) {
+        out = out.filter((r) => r.mainTag && wanted.has(slug(r.mainTag)));
+      } else {
+        out = out.filter((r) => (r.legacyCategories || []).some((c) => wanted.has(slug(c))));
+      }
     }
     if (query.trim()) {
       const q = query.trim().toLowerCase();
@@ -210,7 +248,7 @@ export default function NounsDirectory() {
       });
     }
     return out;
-  }, [rows, selectedTags, query]);
+  }, [rows, selectedTags, useMainTagFilters, query]);
 
   const toggleTag = (tag) => {
     const sl = slug(tag);
@@ -255,9 +293,9 @@ export default function NounsDirectory() {
         </div>
       </div>
 
-      {/* Main Tag chips — stacked grid */}
+      {/* Filter chips — main tags if available, else categories */}
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        {allMainTags.map((t) => (
+        {allFilterTags.map((t) => (
           <Pill
             key={t}
             selected={selectedTags.some((x) => slug(x) === slug(t))}
@@ -268,7 +306,7 @@ export default function NounsDirectory() {
         ))}
       </div>
 
-      {/* Count + Disclaimer on one row */}
+      {/* Count + Disclaimer */}
       <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
         <div>{filtered.length} shown</div>
         <div className="ml-4">
@@ -316,14 +354,20 @@ export default function NounsDirectory() {
                 </h3>
               </div>
 
-              {/* Main tag (small badge) */}
-              {r.mainTag && (
-                <div className="mt-2">
+              {/* Tags on card */}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {r.mainTag ? (
                   <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
                     {r.mainTag}
                   </span>
-                </div>
-              )}
+                ) : (
+                  (r.legacyCategories || []).slice(0, 3).map((c) => (
+                    <span key={c} className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
+                      {c}
+                    </span>
+                  ))
+                )}
+              </div>
 
               {/* Description */}
               <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
