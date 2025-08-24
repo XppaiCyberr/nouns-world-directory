@@ -1,9 +1,9 @@
 // Nouns.world — Filterable Directory (Google Sheets)
-// v7 fixes: resilient column detection + fallbacks so tags never disappear.
-// - Auto-detects column names case-insensitively (e.g., "Main tag" vs "Main Tag").
-// - If no Main tag values exist, filters fall back to legacy Category values.
-// - On each card, show Main tag if present; otherwise show up to 3 legacy Category chips.
-// - Keeps v6 features (intro, disclaimer on right, doodles opt-in, logos).
+// v9:
+// a) Mobile: filters collapse into a dropdown with checkboxes (md+ keeps chip grid)
+// b) Tag colors: switched to monotone neutrals
+// c) Edge doodles: place accessory images around page edges at random angles/sizes (lg+ only)
+//    Put files in /public/images/accessories/ (see ACCESSORY_FILES).
 
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
@@ -11,7 +11,6 @@ import Papa from "papaparse";
 const CONFIG = {
   SHEET_CSV_URL:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pub?gid=0&single=true&output=csv",
-  // Preferred logical names (we'll resolve actual header names dynamically):
   COLUMNS: {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
     link: ["URL", "Link"],
@@ -24,9 +23,27 @@ const CONFIG = {
   },
   site: {
     openLinksInNewTab: true,
-    enableDoodles: false
+    enableAccessoryDoodles: true  // set false to hide edge images
   }
 };
+
+const ACCESSORY_FILES = [
+  "accessory-1-noun-2.png",
+  "accessory-1-noun.png",
+  "accessory-arrow.png",
+  "accessory-bling-rings.png",
+  "accessory-bling.png",
+  "accessory-bulb.png",
+  "accessory-carrot.png",
+  "accessory-eth.png",
+  "accessory-heart.png",
+  "accessory-infinity.png",
+  "accessory-lol.png",
+  "accessory-nil.png",
+  "accessory-rgb.png",
+  "accessory-txt.png",
+  "accessory-wet-money.png"
+];
 
 const slug = (s) =>
   (s || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
@@ -37,22 +54,15 @@ const parseList = (val) =>
     .map((v) => v.trim())
     .filter(Boolean);
 
-const pastelFromText = (text) => {
-  let h = 0;
-  for (let i = 0; i < (text || "").length; i++) h = (h * 31 + text.charCodeAt(i)) % 360;
-  return `hsl(${h} 70% 92%)`;
-};
-
 const Pill = ({ children, selected, onClick }) => (
   <button
     type="button"
     onClick={onClick}
     className={`w-full rounded-2xl border px-3 py-2 text-sm transition ${
       selected
-        ? "border-neutral-800 bg-neutral-900 text-white shadow"
-        : "border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50"
+        ? "border-neutral-900 bg-neutral-900 text-white shadow"
+        : "border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50"
     }`}
-    style={{ backgroundColor: selected ? undefined : pastelFromText(children) }}
   >
     <span className="truncate">{children}</span>
   </button>
@@ -89,24 +99,6 @@ function Disclaimer() {
   );
 }
 
-function Doodles() {
-  if (!CONFIG.site.enableDoodles) return null;
-  return (
-    <div className="pointer-events-none fixed inset-0 hidden lg:block" aria-hidden="true">
-      <div className="absolute left-2 top-24 animate-[floaty_6s_ease-in-out_infinite] opacity-30">
-        <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-          <circle cx="40" cy="40" r="38" stroke="#000" strokeDasharray="6 6" />
-        </svg>
-      </div>
-      <div className="absolute right-4 bottom-24 opacity-30">
-        <svg width="90" height="90" viewBox="0 0 100 100" fill="none" className="animate-[spin-slow_30s_linear_infinite]">
-          <rect x="10" y="10" width="80" height="80" rx="14" stroke="#000" strokeDasharray="8 8" />
-        </svg>
-      </div>
-    </div>
-  );
-}
-
 function Header() {
   return (
     <div className="sticky top-0 z-10 -mx-4 border-b bg-white/90 px-4 py-3 backdrop-blur">
@@ -135,7 +127,7 @@ function Header() {
   );
 }
 
-// Resolve header names case-insensitively based on candidates
+// Resolve header names case-insensitively
 function resolveColumns(fields, candidatesMap) {
   const lowerIndex = new Map(fields.map((f) => [f.toLowerCase().trim(), f]));
   const pick = (arr) => {
@@ -155,6 +147,112 @@ function resolveColumns(fields, candidatesMap) {
     logoUrl: pick(candidatesMap.logoUrl),
     image: pick(candidatesMap.image)
   };
+}
+
+function MobileFilters({ tags, selected, onToggle, onClear }) {
+  const [open, setOpen] = useState(false);
+  const anySelected = selected.length > 0;
+  return (
+    <div className="md:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex w-full items-center justify-between rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
+      >
+        <span className="font-medium">Filter categories</span>
+        <span className="flex items-center gap-2 text-xs text-neutral-600">
+          {anySelected ? `${selected.length} selected` : "None"}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            className={`transition ${open ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          >
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+          </svg>
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-lg">
+          <div className="mb-2 flex items-center justify-between text-xs text-neutral-600">
+            <span>{tags.length} categories</span>
+            {anySelected && (
+              <button onClick={onClear} className="underline">Clear</button>
+            )}
+          </div>
+          <ul className="space-y-2">
+            {tags.map((t) => {
+              const checked = selected.some((x) => slug(x) === slug(t));
+              const id = `tag-${slug(t)}`;
+              return (
+                <li key={t}>
+                  <label htmlFor={id} className="flex items-center gap-2">
+                    <input
+                      id={id}
+                      type="checkbox"
+                      className="h-4 w-4 accent-black"
+                      checked={checked}
+                      onChange={() => onToggle(t)}
+                    />
+                    <span className="text-sm">{t}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EdgeDoodles() {
+  if (!CONFIG.site.enableAccessoryDoodles) return null;
+  // Positions near edges; lg+ only
+  const spots = useMemo(() => {
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const makeSpot = (side) => {
+      const rotate = rand(-25, 25).toFixed(1);
+      const size = rand(36, 110).toFixed(0); // px
+      let style = { transform: `rotate(${rotate}deg)`, width: `${size}px`, height: `${size}px` };
+      const offset = `${rand(8, 85).toFixed(0)}%`;
+      switch (side) {
+        case "left":
+          style.left = "-12px"; style.top = offset; break;
+        case "right":
+          style.right = "-12px"; style.top = offset; break;
+        case "top":
+          style.top = "-12px"; style.left = offset; break;
+        case "bottom":
+          style.bottom = "-12px"; style.left = offset; break;
+      }
+      return style;
+    };
+    const sides = ["left","right","top","bottom"];
+    const count = Math.min(10, ACCESSORY_FILES.length);
+    return Array.from({length: count}).map((_, i) => ({
+      file: ACCESSORY_FILES[i % ACCESSORY_FILES.length],
+      style: makeSpot(sides[i % sides.length])
+    }));
+  }, []);
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-0 hidden lg:block" aria-hidden="true">
+      {spots.map((s, idx) => (
+        <img
+          key={idx}
+          src={`/images/accessories/${s.file}`}
+          alt=""
+          className="absolute opacity-30 select-none"
+          style={s.style}
+          loading="lazy"
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function NounsDirectory() {
@@ -202,7 +300,6 @@ export default function NounsDirectory() {
           };
         });
 
-        // If no rows have a mainTag, fall back to legacy categories for filters
         const hasAnyMain = data.some((r) => !!r.mainTag);
         setUseMainTagFilters(hasAnyMain);
         setRows(data);
@@ -212,7 +309,7 @@ export default function NounsDirectory() {
     });
   }, []);
 
-  // Build filter list
+  // Filter source (main tags if present, else categories)
   const allFilterTags = useMemo(() => {
     const set = new Set();
     if (useMainTagFilters) {
@@ -262,7 +359,7 @@ export default function NounsDirectory() {
   return (
     <div className="mx-auto max-w-6xl px-4 pb-24">
       <Header />
-      <Doodles />
+      <EdgeDoodles />
 
       {/* Intro paragraph */}
       <p className="mt-4 text-sm leading-relaxed text-neutral-700">
@@ -293,8 +390,18 @@ export default function NounsDirectory() {
         </div>
       </div>
 
-      {/* Filter chips — main tags if available, else categories */}
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      {/* Mobile dropdown filters */}
+      <div className="mt-3 md:hidden">
+        <MobileFilters
+          tags={allFilterTags}
+          selected={selectedTags}
+          onToggle={toggleTag}
+          onClear={clearFilters}
+        />
+      </div>
+
+      {/* Desktop/tablet chip grid */}
+      <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
         {allFilterTags.map((t) => (
           <Pill
             key={t}
@@ -354,15 +461,15 @@ export default function NounsDirectory() {
                 </h3>
               </div>
 
-              {/* Tags on card */}
+              {/* Tags on card (monotone) */}
               <div className="mt-2 flex flex-wrap gap-2">
                 {r.mainTag ? (
-                  <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
+                  <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
                     {r.mainTag}
                   </span>
                 ) : (
                   (r.legacyCategories || []).slice(0, 3).map((c) => (
-                    <span key={c} className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-xs text-neutral-700">
+                    <span key={c} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
                       {c}
                     </span>
                   ))
