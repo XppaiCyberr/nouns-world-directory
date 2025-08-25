@@ -1,7 +1,7 @@
-// v27:
-// - Removed the top "main category" chip completely.
-// - Filters still come from Category; chips under description show Card Categories.
-// - Search covers title/description + Category + Card Categories + Hidden tags.
+// v29:
+// - Adds "Explore Projects" button next to Home (https://nouns.world/explore).
+// - Updates intro paragraph text with requested copy + bolding.
+// - Keeps previous logic: filters from Category; card chips under description from Card Categories; top chip removed.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
@@ -32,7 +32,7 @@ const CONFIG = {
         { file: "/images/resource-gif-2.gif", leftVW: 10, topVH: 92, size: 180 },
         { file: "/images/resource-gif-6.gif", rightVW: 18, topVH: 60, size: 200 }
       ],
-        mobile: [
+      mobile: [
         { file: "/images/resource-gif-1.gif", leftVW: 3,  topVH: 18, size: 220 },
         { file: "/images/resource-gif-2.gif", rightVW: 4, topVH: 14, size: 170 },
         { file: "/images/resource-gif-4.gif", leftVW: 12,  topVH: 60, size: 270 },
@@ -169,6 +169,12 @@ function Header() {
             className="rounded-xl border border-white/30 px-3 py-2 text-sm text-white hover:bg-white/10"
           >
             Home
+          </a>
+          <a
+            href="https://nouns.world/explore"
+            className="rounded-xl border border-white/30 px-3 py-2 text-sm text-white hover:bg-white/10"
+          >
+            Explore Projects
           </a>
         </div>
       </div>
@@ -347,9 +353,9 @@ export default function NounsDirectory() {
         <div className="relative z-10 pb-24">
           {/* Intro paragraph */}
           <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
-<strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.  
-They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.  
-Learn, find <strong>art</strong> or <strong>developer resources</strong>, and explore different areas of Nouns through the <strong>categories below</strong>.  
+            <strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.
+            They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
+            Learn, find art or developer resources, and explore different areas of Nouns through the <strong>categories below</strong>.
           </p>
 
           {/* Search + Clear */}
