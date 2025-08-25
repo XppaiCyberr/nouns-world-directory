@@ -1,4 +1,4 @@
-// v22: Share button fully removed; fix JSX conditional; keep higher background art opacity.
+// v23b: Same as v23 (filters use only Category; Additional Categories at card top).
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
@@ -10,8 +10,8 @@ const CONFIG = {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
     link: ["URL", "Link"],
     description: ["Description", "About"],
-    categories: ["Category", "Categories"],
-    mainTag: ["Main tag", "Main Tag", "Primary tag", "Main category", "Main Category"],
+    categories: ["Category"], // filters only
+    additional: ["Additional Categories", "Additional categories"],
     hiddenTags: ["Hidden tags", "Hidden Tags", "Search tags", "Search Keywords"],
     logoUrl: ["Logo URL", "Logo url", "Image URL"],
     image: ["Logo", "Image"]
@@ -52,6 +52,27 @@ const parseList = (val) =>
     .split(/[;,]/)
     .map((v) => v.trim())
     .filter(Boolean);
+
+function resolveColumns(fields, candidatesMap) {
+  const lowerIndex = new Map(fields.map((f) => [f.toLowerCase().trim(), f]));
+  const pick = (arr) => {
+    for (const name of arr) {
+      const found = lowerIndex.get(String(name).toLowerCase());
+      if (found) return found;
+    }
+    return null;
+  };
+  return {
+    title: pick(candidatesMap.title),
+    link: pick(candidatesMap.link),
+    description: pick(candidatesMap.description),
+    categories: pick(candidatesMap.categories),
+    additional: pick(candidatesMap.additional),
+    hiddenTags: pick(candidatesMap.hiddenTags),
+    logoUrl: pick(candidatesMap.logoUrl),
+    image: pick(candidatesMap.image)
+  };
+}
 
 function FixedViewportArt() {
   const [items, setItems] = useState([]);
@@ -230,7 +251,6 @@ export default function NounsDirectory() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTags, setSelectedTags] = useState([]);
-  const [useMainTagFilters, setUseMainTagFilters] = useState(true);
   const [query, setQuery] = useState("");
 
   const containerRef = useRef(null);
@@ -243,29 +263,7 @@ export default function NounsDirectory() {
       complete: (res) => {
         const raw = res.data || [];
         const fields = (res.meta && res.meta.fields) || Object.keys(raw[0] || {});
-        const cols = (function resolveColumns(fields, candidatesMap) {
-          const lowerIndex = new Map(fields.map((f) => [f.toLowerCase().trim(), f]));
-          const pick = (arr) => {
-            for (const name of arr) {
-              const found = lowerIndex.get(String(name).toLowerCase());
-              if (found) return found;
-            }
-            return null;
-          };
-          return {
-            title: pick(candidatesMap.title),
-            link: pick(candidatesMap.link),
-            description: pick(candidatesMap.description),
-            categories: pick(candidatesMap.categories),
-            mainTag: pick(candidatesMap.mainTag),
-            hiddenTags: pick(candidatesMap.hiddenTags),
-            logoUrl: pick(candidatesMap.logoUrl),
-            image: pick(candidatesMap.image)
-          };
-        })(fields, CONFIG.COLUMNS);
-
-        const parseList = (val) => (val || "").split(/[;,]/).map((v) => v.trim()).filter(Boolean);
-        const slug = (s) => (s || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+        const cols = resolveColumns(fields, CONFIG.COLUMNS);
 
         const data = raw.map((row, i) => {
           const titleRaw = (cols.title && row[cols.title]) || "";
@@ -273,9 +271,8 @@ export default function NounsDirectory() {
           const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
           const description = String((cols.description && row[cols.description]) || "").trim();
 
-          const legacyCategories = parseList(cols.categories ? row[cols.categories] : "");
-          const mainTagList = parseList(cols.mainTag ? row[cols.mainTag] : "");
-          const mainTag = mainTagList[0] || "";
+          const categories = parseList(cols.categories ? row[cols.categories] : "");
+          const additional = parseList(cols.additional ? row[cols.additional] : "");
           const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
 
           const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
@@ -283,11 +280,9 @@ export default function NounsDirectory() {
           const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
           const image = logoUrl || legacyLogo || derivedLogo;
 
-          return { key: `${slug(title)}-${i}`, title, link, description, mainTag, hiddenTags: hidden, legacyCategories, image };
+          return { key: `${slug(title)}-${i}`, title, link, description, categories, additional, hiddenTags: hidden, image };
         });
 
-        const hasAnyMain = data.some((r) => !!r.mainTag);
-        setUseMainTagFilters(hasAnyMain);
         setRows(data);
         setLoading(false);
       },
@@ -297,24 +292,15 @@ export default function NounsDirectory() {
 
   const allFilterTags = useMemo(() => {
     const set = new Set();
-    if (useMainTagFilters) {
-      rows.forEach((r) => { if (r.mainTag) set.add(r.mainTag); });
-    } else {
-      rows.forEach((r) => (r.legacyCategories || []).forEach((c) => set.add(c)));
-    }
+    rows.forEach((r) => (r.categories || []).forEach((c) => set.add(c)));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [rows, useMainTagFilters]);
+  }, [rows]);
 
   const filtered = useMemo(() => {
     let out = rows;
-    const slug = (s) => (s || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
     if (selectedTags.length) {
       const wanted = new Set(selectedTags.map((t) => slug(t)));
-      if (useMainTagFilters) {
-        out = out.filter((r) => r.mainTag && wanted.has(slug(r.mainTag)));
-      } else {
-        out = out.filter((r) => (r.legacyCategories || []).some((c) => wanted.has(slug(c))));
-      }
+      out = out.filter((r) => (r.categories || []).some((c) => wanted.has(slug(c))));
     }
     if (query.trim()) {
       const q = query.trim().toLowerCase();
@@ -322,18 +308,17 @@ export default function NounsDirectory() {
         const haystack = [
           r.title,
           r.description,
-          r.mainTag,
-          ...(r.hiddenTags || []),
-          ...(r.legacyCategories || [])
+          ...(r.categories || []),
+          ...(r.additional || []),
+          ...(r.hiddenTags || [])
         ].join(" | ").toLowerCase();
         return haystack.includes(q);
       });
     }
     return out;
-  }, [rows, selectedTags, useMainTagFilters, query]);
+  }, [rows, selectedTags, query]);
 
   const toggleTag = (tag) => {
-    const slug = (s) => (s || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
     const sl = slug(tag);
     setSelectedTags((prev) =>
       prev.some((t) => slug(t) === sl) ? prev.filter((t) => slug(t) !== sl) : [...prev, tag]
@@ -425,6 +410,20 @@ export default function NounsDirectory() {
                   key={r.key}
                   className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
                 >
+                  {/* Additional Categories at the TOP of card */}
+                  {!!(r.additional && r.additional.length) && (
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {r.additional.map((ac) => (
+                        <span
+                          key={`${r.key}-ac-${ac}`}
+                          className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800"
+                        >
+                          {ac}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Header: logo + Title */}
                   <div className="flex items-center gap-3">
                     <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
@@ -464,19 +463,13 @@ export default function NounsDirectory() {
                   {/* Description */}
                   <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
 
-                  {/* Tags under description */}
+                  {/* Category tags under description */}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {r.mainTag ? (
-                      <span className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
-                        {r.mainTag}
+                    {(r.categories || []).slice(0, 4).map((c) => (
+                      <span key={`${r.key}-cat-${c}`} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
+                        {c}
                       </span>
-                    ) : (
-                      (r.legacyCategories || []).slice(0, 3).map((c) => (
-                        <span key={c} className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800">
-                          {c}
-                        </span>
-                      ))
-                    )}
+                    ))}
                   </div>
 
                   {/* Footer: Explore -> aligned right & at bottom */}
