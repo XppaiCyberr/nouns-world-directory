@@ -1,6 +1,6 @@
-// v30:
-// - Hide "Explore Projects" button on mobile (visible at md and up).
-// - Everything else unchanged from v29.
+// v31 (reissued):
+// - Load sheet via Vercel proxy (/api/sheet-proxy?url=...) to avoid CORS/rate limits.
+// - Error UI if parsing fails.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
@@ -8,41 +8,20 @@ import Papa from "papaparse";
 const CONFIG = {
   SHEET_CSV_URL:
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pub?gid=0&single=true&output=csv",
+  PROXY_URL: "/api/sheet-proxy",
   COLUMNS: {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
     link: ["URL", "Link"],
     description: ["Description", "About"],
-    categories: ["Category"], // filters only
-    cardCategories: ["Card Categories", "Card categories"], // chips under description
+    categories: ["Category"],
+    cardCategories: ["Card Categories", "Card categories"],
     hiddenTags: ["Hidden tags", "Hidden Tags", "Search tags", "Search Keywords"],
     logoUrl: ["Logo URL", "Logo url", "Image URL"],
     image: ["Logo", "Image"]
   },
   site: {
     openLinksInNewTab: true,
-    stickyHeader: false,
-    art: {
-      desktop: [
-        { file: "/images/resource-gif-1.gif", leftVW: 3,  topVH: 18, size: 220 },
-        { file: "/images/resource-gif-2.gif", rightVW: 4, topVH: 14, size: 170 },
-        { file: "/images/resource-gif-4.gif", leftVW: 12,  topVH: 60, size: 270 },
-        { file: "/images/resource-gif-3.gif", rightVW: 6, topVH: 88, size: 270 },
-        { file: "/images/resource-gif-5.gif", rightVW: 9, topVH: 36, size: 200 },
-        { file: "/images/resource-gif-2.gif", leftVW: 10, topVH: 92, size: 180 },
-        { file: "/images/resource-gif-6.gif", rightVW: 18, topVH: 60, size: 200 }
-      ],
-      mobile: [
-        { file: "/images/resource-gif-1.gif", leftVW: 3,  topVH: 18, size: 220 },
-        { file: "/images/resource-gif-2.gif", rightVW: 4, topVH: 14, size: 170 },
-        { file: "/images/resource-gif-4.gif", leftVW: 12,  topVH: 60, size: 270 },
-        { file: "/images/resource-gif-3.gif", rightVW: 6, topVH: 88, size: 270 },
-        { file: "/images/resource-gif-5.gif", rightVW: 9, topVH: 36, size: 200 },
-        { file: "/images/resource-gif-2.gif", leftVW: 10, topVH: 92, size: 180 },
-        { file: "/images/resource-gif-6.gif", rightVW: 18, topVH: 60, size: 200 }
-      ],
-      breakpoint: 1024,
-      opacity: 0.34
-    }
+    stickyHeader: false
   }
 };
 
@@ -74,47 +53,6 @@ function resolveColumns(fields, candidatesMap) {
     logoUrl: pick(candidatesMap.logoUrl),
     image: pick(candidatesMap.image)
   };
-}
-
-function FixedViewportArt() {
-  const [items, setItems] = useState([]);
-
-  useEffect(() => {
-    const build = () => {
-      const set = window.innerWidth >= CONFIG.site.art.breakpoint ? CONFIG.site.art.desktop : CONFIG.site.art.mobile;
-      setItems(set);
-    };
-    build();
-    window.addEventListener("resize", build);
-    return () => window.removeEventListener("resize", build);
-  }, []);
-
-  if (!items.length) return null;
-
-  return (
-    <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-      {items.map((it, i) => {
-        const style = {
-          width: it.size + "px",
-          height: it.size + "px",
-          top: it.topVH != null ? `calc(${it.topVH}vh - ${it.size/2}px)` : undefined,
-          left: it.leftVW != null ? `calc(${it.leftVW}vw - ${it.size/2}px)` : undefined,
-          right: it.rightVW != null ? `calc(${it.rightVW}vw - ${it.size/2}px)` : undefined,
-          opacity: CONFIG.site.art.opacity
-        };
-        return (
-          <img
-            key={i}
-            src={it.file}
-            alt=""
-            loading="lazy"
-            className="absolute select-none"
-            style={style}
-          />
-        );
-      })}
-    </div>
-  );
 }
 
 function Disclaimer() {
@@ -258,54 +196,61 @@ function MobileFilters({ tags, selected, onToggle, onClear }) {
 export default function NounsDirectory() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [selectedTags, setSelectedTags] = useState([]);
   const [query, setQuery] = useState("");
 
   const containerRef = useRef(null);
 
   useEffect(() => {
-    Papa.parse(CONFIG.SHEET_CSV_URL, {
+    const url = `${CONFIG.PROXY_URL}?url=${encodeURIComponent(CONFIG.SHEET_CSV_URL)}`;
+    Papa.parse(url, {
       header: true,
       download: true,
       skipEmptyLines: true,
       complete: (res) => {
-        const raw = res.data || [];
-        const fields = (res.meta && res.meta.fields) || Object.keys(raw[0] || {});
-        const cols = resolveColumns(fields, CONFIG.COLUMNS);
+        try {
+          const raw = res.data || [];
+          const fields = (res.meta && res.meta.fields) || Object.keys(raw[0] || {});
+          if (!fields.length) throw new Error("No columns detected");
+          const cols = resolveColumns(fields, CONFIG.COLUMNS);
+          const data = raw.map((row, i) => {
+            const titleRaw = (cols.title && row[cols.title]) || "";
+            const link = (cols.link && row[cols.link]) || "";
+            const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
+            const description = String((cols.description && row[cols.description]) || "").trim();
 
-        const data = raw.map((row, i) => {
-          const titleRaw = (cols.title && row[cols.title]) || "";
-          const link = (cols.link && row[cols.link]) || "";
-          const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
-          const description = String((cols.description && row[cols.description]) || "").trim();
+            const categories = parseList(cols.categories ? row[cols.categories] : "");
+            const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
+            const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
 
-          const categories = parseList(cols.categories ? row[cols.categories] : "");
-          const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-          const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
+            const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
+            const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
+            const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+            const image = logoUrl || legacyLogo || derivedLogo;
 
-          const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-          const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-          const image = logoUrl || legacyLogo || derivedLogo;
-
-          return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-        });
-
-        setRows(data);
+            return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
+          });
+          setRows(data);
+          setLoading(false);
+        } catch (e) {
+          setError("We couldn't read the sheet. It might be unpublished or rate-limited. Try reloading in a minute.");
+          setLoading(false);
+        }
+      },
+      error: () => {
+        setError("Network error while loading the sheet.");
         setLoading(false);
       },
-      error: () => setLoading(false),
     });
   }, []);
 
-  // Filters: built from Category
   const allFilterTags = useMemo(() => {
     const set = new Set();
     rows.forEach((r) => (r.categories || []).forEach((c) => set.add(c)));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [rows]);
 
-  // Apply filters + search
   const filtered = useMemo(() => {
     let out = rows;
     if (selectedTags.length) {
@@ -339,25 +284,18 @@ export default function NounsDirectory() {
 
   return (
     <>
-      {/* Fixed art at back */}
-      <FixedViewportArt />
-
-      {/* Header */}
       <div className="relative z-30">
         <Header />
       </div>
 
-      {/* Content */}
       <div ref={containerRef} className="relative mx-auto max-w-6xl px-4">
         <div className="relative z-10 pb-24">
-          {/* Intro paragraph */}
           <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
             <strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.
             They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
             Learn, find art or developer resources, and explore different areas of Nouns through the <strong>categories below</strong>.
           </p>
 
-          {/* Search + Clear */}
           <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="sr-only">Explore Nounish Projects</div>
             <div className="flex flex-wrap items-center gap-2">
@@ -368,7 +306,7 @@ export default function NounsDirectory() {
                 className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
                 aria-label="Search"
               />
-              {selectedTags.length > 0 && (
+              {selectedTags.length > 0 and (
                 <button
                   onClick={clearFilters}
                   className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
@@ -379,7 +317,16 @@ export default function NounsDirectory() {
             </div>
           </div>
 
-          {/* Mobile dropdown filters */}
+          {error and (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              {error}{" "}
+              <span className="block text-xs text-amber-800 mt-1">
+                Quick checks: Ensure the sheet is still <em>Published to the web</em>, the link hasn&apos;t changed, and column headers match
+                <code className="mx-1">Category</code> / <code className="mx-1">Card Categories</code> / <code className="mx-1">URL</code> / <code className="mx-1">Description</code>.
+              </span>
+            </div>
+          )}
+
           <div className="mt-3 md:hidden">
             <MobileFilters
               tags={allFilterTags}
@@ -389,7 +336,6 @@ export default function NounsDirectory() {
             />
           </div>
 
-          {/* Desktop filters */}
           <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
             {allFilterTags.map((t) => (
               <Pill
@@ -402,7 +348,6 @@ export default function NounsDirectory() {
             ))}
           </div>
 
-          {/* Count + Disclaimer */}
           <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
             <div className="bg-white/90 px-1">{filtered.length} shown</div>
             <div className="ml-4">
@@ -410,7 +355,6 @@ export default function NounsDirectory() {
             </div>
           </div>
 
-          {/* Cards */}
           {loading ? (
             <div className="mt-6 text-sm text-neutral-600">Loading…</div>
           ) : (
@@ -420,7 +364,6 @@ export default function NounsDirectory() {
                   key={r.key}
                   className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
                 >
-                  {/* Header: logo + Title */}
                   <div className="flex items-center gap-3">
                     <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
                       {r.image ? (
@@ -456,11 +399,9 @@ export default function NounsDirectory() {
                     </h3>
                   </div>
 
-                  {/* Description */}
                   <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
 
-                  {/* Card Categories chips UNDER description */}
-                  {!!(r.cardCategories && r.cardCategories.length) && (
+                  {!!(r.cardCategories && r.cardCategories.length) and (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.cardCategories.map((cc) => (
                         <span
@@ -473,15 +414,14 @@ export default function NounsDirectory() {
                     </div>
                   )}
 
-                  {/* Footer: Explore -> aligned right & at bottom */}
-                  {r.link && (
+                  {r.link and (
                     <div className="mt-auto pt-4 flex justify-end">
                       <a
                         href={r.link}
                         target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
                         rel="noreferrer noopener"
                         className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
-                        >
+                      >
                         Explore →
                       </a>
                     </div>
