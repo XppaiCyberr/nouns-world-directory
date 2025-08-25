@@ -347,9 +347,9 @@ export default function NounsDirectory() {
         <div className="relative z-10 pb-24">
           {/* Intro paragraph */}
           <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
-<strong>Nouns</strong> is built by a <strong>community</strong> of creators.  
-Here you can <strong>learn</strong>, find <strong>art</strong> or <strong>developer resources</strong>.  
-Filter by <strong>category below</strong> to start exploring. 
+<strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.  
+They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.  
+Learn, find <strong>art</strong> or <strong>developer resources</strong>, and explore different areas of Nouns through the <strong>categories below</strong>.  
           </p>
 
           {/* Search + Clear */}
