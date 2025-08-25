@@ -1,7 +1,6 @@
-// v26:
-// - TOP chip shows the MAIN category (first value from "Category").
-// - UNDER description shows chips from "Card Categories".
-// - Filters built from all values in "Category".
+// v27:
+// - Removed the top "main category" chip completely.
+// - Filters still come from Category; chips under description show Card Categories.
 // - Search covers title/description + Category + Card Categories + Hidden tags.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +13,7 @@ const CONFIG = {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
     link: ["URL", "Link"],
     description: ["Description", "About"],
-    categories: ["Category"], // filters + MAIN chip
+    categories: ["Category"], // filters only
     cardCategories: ["Card Categories", "Card categories"], // chips under description
     hiddenTags: ["Hidden tags", "Hidden Tags", "Search tags", "Search Keywords"],
     logoUrl: ["Logo URL", "Logo url", "Image URL"],
@@ -33,7 +32,7 @@ const CONFIG = {
         { file: "/images/resource-gif-2.gif", leftVW: 10, topVH: 92, size: 180 },
         { file: "/images/resource-gif-6.gif", rightVW: 18, topVH: 60, size: 200 }
       ],
-      mobile: [
+        mobile: [
         { file: "/images/resource-gif-1.gif", leftVW: 3,  topVH: 18, size: 220 },
         { file: "/images/resource-gif-2.gif", rightVW: 4, topVH: 14, size: 170 },
         { file: "/images/resource-gif-4.gif", leftVW: 12,  topVH: 60, size: 270 },
@@ -416,16 +415,7 @@ export default function NounsDirectory() {
                   key={r.key}
                   className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
                 >
-                  {/* MAIN category chip at the TOP of card (first Category value) */}
-                  {!!(r.categories && r.categories.length) && (
-                    <div className="mb-2 flex flex-wrap gap-2">
-                      <span
-                        className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800"
-                      >
-                        {r.categories[0]}
-                      </span>
-                    </div>
-                  )}
+                  {/* (Top chip removed) */}
 
                   {/* Header: logo + Title */}
                   <div className="flex items-center gap-3">
@@ -466,7 +456,7 @@ export default function NounsDirectory() {
                   {/* Description */}
                   <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
 
-                  {/* Additional (Card Categories) chips UNDER description */}
+                  {/* Card Categories chips UNDER description */}
                   {!!(r.cardCategories && r.cardCategories.length) && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.cardCategories.map((cc) => (
