@@ -1,15 +1,12 @@
-// v37 — HTML via proxy (with iframe follow) → CSV fallback. Background art restored.
-// - Fixes blank page by fetching pubhtml through your proxy (avoids CORS).
-// - If pubhtml wraps the sheet inside an <iframe>, we follow that src and parse it too.
-// - If HTML still fails, we try CSV via proxy, then direct CSV as last resort.
-// - Restores the side background art you had earlier.
+// v38 — CSV-only loader
+// - Fetches CSV via /api/sheet-proxy first (for CORS + CDN), then direct.
+// - Columns supported: Name/Title, URL/Link, Description, Category, Card Categories, Hidden tags, Logo URL, Logo
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 
 const CONFIG = {
-  SHEET_HTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pubhtml?gid=0&single=true",
-  SHEET_CSV_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pub?gid=0&single=true&output=csv",
+  SHEET_CSV_URL: "/resources.csv",
   PROXY_URL: "/api/sheet-proxy",
   COLUMNS: {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
@@ -79,421 +76,6 @@ function resolveColumns(fields, candidatesMap) {
   };
 }
 
-// --- HTML parsing helpers ---
-function absoluteUrlMaybe(src) {
-  try {
-    if (!src) return "";
-    if (/^https?:\/\//i.test(src)) return src;
-    return new URL(src, "https://docs.google.com").toString();
-  } catch {
-    return src || "";
-  }
-}
-
-function parseHtmlTable(doc) {
-  // Prefer waffle; otherwise the largest table
-  let table = doc.querySelector("table.waffle");
-  if (!table) {
-    const tables = Array.from(doc.querySelectorAll("table"));
-    table = tables.sort((a,b) => (b.textContent || "").length - (a.textContent || "").length)[0] || null;
-  }
-  if (!table) return { rows: [], fields: [], hrefMaps: [] };
-
-  // Build headers
-  let headerCells = Array.from(table.querySelectorAll("thead tr th"));
-  if (!headerCells.length) {
-    const firstRow = table.querySelector("tr");
-    if (firstRow) headerCells = Array.from(firstRow.querySelectorAll("th,td"));
-  }
-  const headers = headerCells.map((td, i) => (td.textContent || "").trim() || `col_${i}`);
-  if (!headers.length) return { rows: [], fields: [], hrefMaps: [] };
-
-  // Build row objects + href maps
-  const trs = Array.from(table.querySelectorAll("tbody tr"));
-  const bodyRows = trs.length ? trs : Array.from(table.querySelectorAll("tr")).slice(1);
-
-  const rows = [];
-  const hrefMaps = [];
-  for (const tr of bodyRows) {
-    const cells = Array.from(tr.querySelectorAll("td"));
-    if (!cells.length) continue;
-    const obj = {};
-    const hrefObj = {};
-    headers.forEach((h, i) => {
-      const td = cells[i];
-      const text = (td?.textContent || "").replace(/\s+/g, " ").trim();
-      const a = td?.querySelector("a[href]");
-      const href = a ? a.getAttribute("href") || "" : "";
-      obj[h] = text;
-      hrefObj[h] = href;
-    });
-    // ignore all-empty rows
-    if (Object.values(obj).every((v) => v === "")) continue;
-    rows.push(obj);
-    hrefMaps.push(hrefObj);
-  }
-
-  return { rows, fields: headers, hrefMaps };
-}
-
-export default function NounsDirectory() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [debugOpen, setDebugOpen] = useState(false);
-  const [debugSnippet, setDebugSnippet] = useState("");
-  const [debugFields, setDebugFields] = useState([]);
-  const [selectedTags, setSelectedTags] = useState([]);
-  const [query, setQuery] = useState("");
-
-  const containerRef = useRef(null);
-
-  useEffect(() => {
-    let aborted = false;
-
-    async function fetchText(url) {
-      const r = await fetch(url, { cache: "no-store" });
-      const t = await r.text();
-      return { ok: r.ok, text: t, status: r.status };
-    }
-
-    async function fetchViaProxy(url) {
-      return fetchText(`${CONFIG.PROXY_URL}?url=${encodeURIComponent(url)}`);
-    }
-
-    async function load() {
-      setLoading(true);
-      setError("");
-      setDebugSnippet("");
-      setDebugFields([]);
-
-      // Step 1: pubhtml via proxy
-      try {
-        const r0 = await fetchViaProxy(CONFIG.SHEET_HTML_URL);
-        if (r0.ok) {
-          const doc = new DOMParser().parseFromString(r0.text, "text/html");
-          // If the actual sheet is inside an iframe, follow it
-          let parsed = parseHtmlTable(doc);
-          if (!parsed.fields.length) {
-            const iframe = doc.querySelector('iframe[src]');
-            if (iframe) {
-              const src = absoluteUrlMaybe(iframe.getAttribute('src'));
-              const r1 = await fetchViaProxy(src);
-              if (r1.ok) {
-                const doc2 = new DOMParser().parseFromString(r1.text, "text/html");
-                parsed = parseHtmlTable(doc2);
-              }
-            }
-          }
-
-          if (parsed.fields.length && parsed.rows.length) {
-            if (aborted) return;
-            setDebugFields(parsed.fields);
-            const cols = resolveColumns(parsed.fields, CONFIG.COLUMNS);
-            const data = parsed.rows.map((row, i) => {
-              const titleRaw = (cols.title && row[cols.title]) || "";
-              let link = (cols.link && row[cols.link]) || "";
-              // If URL column empty, try anchor in title/URL cell
-              if (!link && row[cols.title]) {
-                // No direct href map available here, but often URL col is used.
-              }
-              const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
-              const description = String((cols.description && row[cols.description]) || "").trim();
-
-              const categories = parseList(cols.categories ? row[cols.categories] : "");
-              const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-              const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
-
-              const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-              const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-              const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-              const image = logoUrl || legacyLogo || derivedLogo;
-
-              return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-            });
-            setRows(data);
-            setLoading(false);
-            return;
-          } else {
-            setDebugSnippet(r0.text.slice(0,200));
-          }
-        }
-      } catch {}
-
-      // Step 2: CSV via proxy
-      try {
-        const r2 = await fetchViaProxy(CONFIG.SHEET_CSV_URL);
-        if (r2.ok && !/^\s*</.test(r2.text)) {
-          const parsed = Papa.parse(r2.text, { header: true, skipEmptyLines: true });
-          const fields = parsed.meta?.fields || Object.keys(parsed.data?.[0] || {});
-          if (fields.length) {
-            if (aborted) return;
-            setDebugFields(fields);
-            const cols = resolveColumns(fields, CONFIG.COLUMNS);
-            const data = (parsed.data || []).map((row, i) => {
-              const titleRaw = (cols.title && row[cols.title]) || "";
-              const link = (cols.link && row[cols.link]) || "";
-              const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
-              const description = String((cols.description && row[cols.description]) || "").trim();
-
-              const categories = parseList(cols.categories ? row[cols.categories] : "");
-              const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-              const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
-
-              const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-              const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-              const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-              const image = logoUrl || legacyLogo || derivedLogo;
-
-              return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-            });
-            setRows(data);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
-
-      // Step 3: direct CSV
-      try {
-        const r3 = await fetchText(CONFIG.SHEET_CSV_URL);
-        if (r3.ok && !/^\s*</.test(r3.text)) {
-          const parsed = Papa.parse(r3.text, { header: true, skipEmptyLines: true });
-          const fields = parsed.meta?.fields || Object.keys(parsed.data?.[0] || {});
-          if (fields.length) {
-            if (aborted) return;
-            setDebugFields(fields);
-            const cols = resolveColumns(fields, CONFIG.COLUMNS);
-            const data = (parsed.data || []).map((row, i) => {
-              const titleRaw = (cols.title && row[cols.title]) || "";
-              const link = (cols.link && row[cols.link]) || "";
-              const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
-              const description = String((cols.description && row[cols.description]) || "").trim();
-
-              const categories = parseList(cols.categories ? row[cols.categories] : "");
-              const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-              const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
-
-              const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-              const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-              const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-              const image = logoUrl || legacyLogo || derivedLogo;
-
-              return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-            });
-            setRows(data);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
-
-      setError("Could not parse the published HTML or CSV right now. If this persists, share the /export?format=csv&gid=… link and I’ll wire that in.");
-      setLoading(false);
-    }
-
-    load();
-    return () => { aborted = true; };
-  }, []);
-
-  const allFilterTags = useMemo(() => {
-    const set = new Set();
-    rows.forEach((r) => (r.categories || []).forEach((c) => set.add(c)));
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
-
-  const filtered = useMemo(() => {
-    let out = rows;
-    if (selectedTags.length) {
-      const wanted = new Set(selectedTags.map((t) => slug(t)));
-      out = out.filter((r) => (r.categories || []).some((c) => wanted.has(slug(c))));
-    }
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      out = out.filter((r) => {
-        const haystack = [
-          r.title,
-          r.description,
-          ...(r.categories || []),
-          ...(r.cardCategories || []),
-          ...(r.hiddenTags || [])
-        ].join(" | ").toLowerCase();
-        return haystack.includes(q);
-      });
-    }
-    return out;
-  }, [rows, selectedTags, query]);
-
-  const toggleTag = (tag) => {
-    const sl = slug(tag);
-    setSelectedTags((prev) =>
-      prev.some((t) => slug(t) === sl) ? prev.filter((t) => slug(t) !== sl) : [...prev, tag]
-    );
-  };
-
-  const clearFilters = () => setSelectedTags([]);
-
-  return (
-    <>
-      {/* Fixed art at back (restored) */}
-      <FixedViewportArt />
-
-      {/* Header */}
-      <div className="relative z-30">
-        <Header />
-      </div>
-
-      {/* Content */}
-      <div ref={containerRef} className="relative mx-auto max-w-6xl px-4">
-        <div className="relative z-10 pb-24">
-          {/* Intro paragraph */}
-          <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
-            <strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.
-            They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
-            Learn, find art or developer resources, and explore different areas of Nouns through the <strong>categories below</strong>.
-          </p>
-
-          {/* Search + Clear */}
-          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="sr-only">Explore Nounish Projects</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search resources…"
-                className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
-                aria-label="Search"
-                name="q" id="q"
-              />
-              {selectedTags.length > 0 && (
-                <button
-                  onClick={clearFilters}
-                  className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Mobile dropdown filters */}
-          <div className="mt-3 md:hidden">
-            <MobileFilters
-              tags={allFilterTags}
-              selected={selectedTags}
-              onToggle={toggleTag}
-              onClear={clearFilters}
-            />
-          </div>
-
-          {/* Desktop filters */}
-          <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
-            {allFilterTags.map((t) => (
-              <Pill
-                key={t}
-                selected={selectedTags.some((x) => slug(x) === slug(t))}
-                onClick={() => toggleTag(t)}
-              >
-                {t}
-              </Pill>
-            ))}
-          </div>
-
-          {/* Count + Disclaimer */}
-          <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
-            <div className="bg-white/90 px-1">{filtered.length} shown</div>
-            <div className="ml-4">
-              <Disclaimer />
-            </div>
-          </div>
-
-          {/* Cards */}
-          {loading ? (
-            <div className="mt-6 text-sm text-neutral-600">Loading…</div>
-          ) : (
-            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((r) => (
-                <article
-                  key={r.key}
-                  className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
-                >
-                  {/* Header: logo + Title */}
-                  <div className="flex items-center gap-3">
-                    <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
-                      {r.image ? (
-                        <img
-                          src={r.image}
-                          alt=""
-                          width="30"
-                          height="30"
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.remove();
-                            const p = e.currentTarget.parentElement;
-                            p && p.classList.remove("bg-neutral-100");
-                            p && p.classList.add("bg-black");
-                          }}
-                        />
-                      ) : null}
-                    </div>
-                    <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
-                      {r.link ? (
-                        <a
-                          href={r.link}
-                          target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
-                          rel="noreferrer noopener"
-                          className="hover:underline"
-                        >
-                          {r.title}
-                        </a>
-                      ) : (
-                        r.title
-                      )}
-                    </h3>
-                  </div>
-
-                  {/* Description */}
-                  <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
-
-                  {/* Tags under description (Card Categories) */}
-                  {!!(r.cardCategories && r.cardCategories.length) && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {r.cardCategories.map((cc) => (
-                        <span
-                          key={`${r.key}-cc-${cc}`}
-                          className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800"
-                        >
-                          {cc}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Footer: Explore → aligned right */}
-                  {r.link && (
-                    <div className="mt-auto pt-4 flex justify-end">
-                      <a
-                        href={r.link}
-                        target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
-                        rel="noreferrer noopener"
-                        className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
-                      >
-                        Explore →
-                      </a>
-                    </div>
-                  )}
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
-// --- UI bits reused from earlier builds ---
 function Disclaimer() {
   const [open, setOpen] = useState(false);
   return (
@@ -629,6 +211,281 @@ function MobileFilters({ tags, selected, onToggle, onClear }) {
         </div>
       )}
     </div>
+  );
+}
+
+export default function NounsDirectory() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugSnippet, setDebugSnippet] = useState("");
+  const [debugFields, setDebugFields] = useState([]);
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [query, setQuery] = useState("");
+
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    let aborted = false;
+
+    async function fetchText(url) {
+      const r = await fetch(url, { cache: "no-store" });
+      const t = await r.text();
+      return { ok: r.ok, text: t, status: r.status };
+    }
+
+    async function fetchViaProxy(url) {
+      return fetchText(`${CONFIG.PROXY_URL}?url=${encodeURIComponent(url)}`);
+    }
+
+    async function load() {
+      setLoading(true);
+      setError("");
+      setDebugSnippet("");
+      setDebugFields([]);
+
+      let csvText = null;
+
+      // CSV via proxy first
+      try {
+        const r1 = await fetchViaProxy(CONFIG.SHEET_CSV_URL);
+        if (r1.ok && !/^\s*</.test(r1.text)) {
+          csvText = r1.text;
+        } else if (r1.ok) {
+          setDebugSnippet(r1.text.slice(0,200));
+        }
+      } catch {}
+
+      // Direct CSV fallback
+      if (!csvText) {
+        try {
+          const r2 = await fetchText(CONFIG.SHEET_CSV_URL);
+          if (r2.ok && !/^\s*</.test(r2.text)) csvText = r2.text;
+          else if (r2.ok) setDebugSnippet(r2.text.slice(0,200));
+        } catch {}
+      }
+
+      if (!csvText) {
+        setError("Could not fetch CSV data. Check the URL or try again.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        const fields = parsed.meta?.fields || Object.keys(parsed.data?.[0] || {});
+        if (!fields.length) throw new Error("No header row detected.");
+        if (aborted) return;
+        setDebugFields(fields);
+        const cols = resolveColumns(fields, CONFIG.COLUMNS);
+        const data = (parsed.data || []).map((row, i) => {
+          const titleRaw = (cols.title && row[cols.title]) || "";
+          const link = (cols.link && row[cols.link]) || "";
+          const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
+          const description = String((cols.description && row[cols.description]) || "").trim();
+          const categories = parseList(cols.categories ? row[cols.categories] : "");
+          const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
+          const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
+          const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
+          const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
+          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+          const image = logoUrl || legacyLogo || derivedLogo;
+          return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
+        });
+        setRows(data);
+        setLoading(false);
+      } catch (e) {
+        setError("We fetched CSV but couldn’t parse it. Check columns and formatting.");
+        setLoading(false);
+      }
+    }
+
+    load();
+    return () => { aborted = true; };
+  }, []);
+
+  const allFilterTags = useMemo(() => {
+    const set = new Set();
+    rows.forEach((r) => (r.categories || []).forEach((c) => set.add(c)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let out = rows;
+    if (selectedTags.length) {
+      const wanted = new Set(selectedTags.map((t) => slug(t)));
+      out = out.filter((r) => (r.categories || []).some((c) => wanted.has(slug(c))));
+    }
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      out = out.filter((r) => {
+        const haystack = [
+          r.title,
+          r.description,
+          ...(r.categories || []),
+          ...(r.cardCategories || []),
+          ...(r.hiddenTags || [])
+        ].join(" | ").toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+    return out;
+  }, [rows, selectedTags, query]);
+
+  const toggleTag = (tag) => {
+    const sl = slug(tag);
+    setSelectedTags((prev) =>
+      prev.some((t) => slug(t) === sl) ? prev.filter((t) => slug(t) !== sl) : [...prev, tag]
+    );
+  };
+
+  const clearFilters = () => setSelectedTags([]);
+
+  return (
+    <>
+      <FixedViewportArt />
+
+      <div className="relative z-30">
+        <Header />
+      </div>
+
+      <div ref={containerRef} className="relative mx-auto max-w-6xl px-4">
+        <div className="relative z-10 pb-24">
+          <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
+            <strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.
+            They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
+            Learn, find art or developer resources, and explore different areas of Nouns through the <strong>categories below</strong>.
+          </p>
+
+          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="sr-only">Explore Nounish Projects</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search resources…"
+                className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
+                aria-label="Search"
+                name="q" id="q"
+              />
+              {selectedTags.length > 0 && (
+                <button
+                  onClick={clearFilters}
+                  className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 md:hidden">
+            <MobileFilters
+              tags={allFilterTags}
+              selected={selectedTags}
+              onToggle={toggleTag}
+              onClear={clearFilters}
+            />
+          </div>
+
+          <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
+            {allFilterTags.map((t) => (
+              <Pill
+                key={t}
+                selected={selectedTags.some((x) => slug(x) === slug(t))}
+                onClick={() => toggleTag(t)}
+              >
+                {t}
+              </Pill>
+            ))}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
+            <div className="bg-white/90 px-1">{filtered.length} shown</div>
+            <div className="ml-4">
+              <Disclaimer />
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="mt-6 text-sm text-neutral-600">Loading…</div>
+          ) : (
+            <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((r) => (
+                <article
+                  key={r.key}
+                  className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
+                      {r.image ? (
+                        <img
+                          src={r.image}
+                          alt=""
+                          width="30"
+                          height="30"
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.remove();
+                            const p = e.currentTarget.parentElement;
+                            p && p.classList.remove("bg-neutral-100");
+                            p && p.classList.add("bg-black");
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                    <h3 className="min-w-0 truncate text-lg font-semibold leading-snug">
+                      {r.link ? (
+                        <a
+                          href={r.link}
+                          target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
+                          rel="noreferrer noopener"
+                          className="hover:underline"
+                        >
+                          {r.title}
+                        </a>
+                      ) : (
+                        r.title
+                      )}
+                    </h3>
+                  </div>
+
+                  <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
+
+                  {!!(r.cardCategories && r.cardCategories.length) && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {r.cardCategories.map((cc) => (
+                        <span
+                          key={`${{r.key}}-cc-${{cc}}`}
+                          className="rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-xs text-neutral-800"
+                        >
+                          {cc}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {r.link && (
+                    <div className="mt-auto pt-4 flex justify-end">
+                      <a
+                        href={r.link}
+                        target={CONFIG.site.openLinksInNewTab ? "_blank" : undefined}
+                        rel="noreferrer noopener"
+                        className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
+                      >
+                        Explore →
+                      </a>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
