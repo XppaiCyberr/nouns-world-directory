@@ -1,13 +1,12 @@
-// v35 — Prefer HTML (pubhtml) first, then CSV (proxy → direct).
-// Why: your HTML endpoint is reliable while CSV sometimes 400s.
+// v36 — Minimal, stable: HTML-only loader (no CSV, no proxy).
+// Fixes blank page by simplifying the data pipeline to one fetch/one parser.
+//
+// If you want to re-enable CSV later, we can add it back behind this.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Papa from "papaparse";
 
 const CONFIG = {
   SHEET_HTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pubhtml?gid=0&single=true",
-  SHEET_CSV_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pub?gid=0&single=true&output=csv",
-  PROXY_URL: "/api/sheet-proxy",
   COLUMNS: {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
     link: ["URL", "Link"],
@@ -59,7 +58,7 @@ function parsePublishedHtml(text) {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(text, "text/html");
-    // Google often uses table.waffle; otherwise pick the largest table
+    // Prefer the waffle table; otherwise largest table
     let table = doc.querySelector("table.waffle");
     if (!table) {
       const tables = Array.from(doc.querySelectorAll("table"));
@@ -67,16 +66,182 @@ function parsePublishedHtml(text) {
     }
     if (!table) return { rows: [], fields: [] };
 
-    const trs = Array.from(table.querySelectorAll("tr"));
-    const raw = trs.map(tr => Array.from(tr.querySelectorAll("th,td")).map(td => (td.textContent||"").replace(/\s+/g," ").trim()));
-    if (!raw.length) return { rows: [], fields: [] };
+    // Headers might be in a THEAD with THs. Collect the first non-empty header row.
+    const headerCells = Array.from(table.querySelectorAll("thead tr th"));
+    let headers = headerCells.map(td => (td.textContent || "").trim());
+    if (!headers.length) {
+      const firstRow = table.querySelector("tr");
+      if (!firstRow) return { rows: [], fields: [] };
+      const ths = Array.from(firstRow.querySelectorAll("th,td"));
+      headers = ths.map(td => (td.textContent || "").trim());
+    }
+    headers = headers.map((h,i) => h || `col_{i}`);
 
-    const headers = raw[0].map((h,i) => h || `col_{i}`);
-    const rows = raw.slice(1).map(r => Object.fromEntries(headers.map((h,i) => [h, r[i] ?? ""])));
+    // Rows (skip header row if duplicated in TBODY)
+    const bodyRows = Array.from(table.querySelectorAll("tbody tr"));
+    const rows = [];
+    if (bodyRows.length) {
+      for (const tr of bodyRows) {
+        const cells = Array.from(tr.querySelectorAll("td"));
+        if (!cells.length) continue;
+        const obj = {};
+        headers.forEach((h,i) => (obj[h] = (cells[i]?.textContent || "").replace(/\s+/g," ").trim()));
+        rows.push(obj);
+      }
+    } else {
+      // fallback: all TRs after the first header TR
+      const trs = Array.from(table.querySelectorAll("tr")).slice(1);
+      for (const tr of trs) {
+        const cells = Array.from(tr.querySelectorAll("td"));
+        if (!cells.length) continue;
+        const obj = {};
+        headers.forEach((h,i) => (obj[h] = (cells[i]?.textContent || "").replace(/\s+/g," ").trim()));
+        rows.push(obj);
+      }
+    }
+
     return { rows, fields: headers };
   } catch (e) {
     return { rows: [], fields: [] };
   }
+}
+
+function Disclaimer() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex items-center gap-2 text-xs text-neutral-600">
+      <span className="font-medium">Disclaimer</span>
+      <div
+        className="relative"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+      >
+        <button
+          type="button"
+          aria-label="Disclaimer information"
+          onClick={() => setOpen((v) => !v)}
+          className="flex h-5 w-5 items-center justify-center rounded-full border border-neutral-300 text-[10px] leading-none"
+        >
+          i
+        </button>
+        <div
+          className={`absolute right-0 top-full mt-2 w-80 rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-800 shadow-lg transition ${open ? "opacity-100 scale-100" : "pointer-events-none opacity-0 scale-95"}`}
+        >
+          <strong>Warning.</strong> Links lead off of nouns.world. Please make sure to do your own research
+          and only click links or connect to websites you trust.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Header() {
+  const stick = CONFIG.site.stickyHeader;
+  return (
+    <div className={`${stick ? "sticky top-0" : ""} z-30 w-full bg-black text-white`}>
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center overflow-hidden">
+            <img
+              src="/nouns-world-globe.gif"
+              alt="Nouns.world"
+              className="h-full w-full object-contain"
+              onError={(e) => e.currentTarget.remove()}
+            />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight md:text-2xl">NOUNS.WORLD/RESOURCES</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://nouns.world"
+            className="rounded-xl border border-white/30 px-3 py-2 text-sm text-white hover:bg-white/10"
+          >
+            Home
+          </a>
+          <a
+            href="https://nouns.world/explore"
+            className="hidden md:inline-flex rounded-xl border border-white/30 px-3 py-2 text-sm text-white hover:bg-white/10"
+          >
+            Explore Projects
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const Pill = ({ children, selected, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-full rounded-2xl px-3 py-2 text-sm transition ${
+      selected
+        ? "border-2 border-black bg-black text-white shadow"
+        : "border-2 border-black bg-white text-black hover:bg-neutral-50"
+    }`}
+  >
+    <span className="truncate">{children}</span>
+  </button>
+);
+
+function MobileFilters({ tags, selected, onToggle, onClear }) {
+  const [open, setOpen] = useState(false);
+  const anySelected = selected.length > 0;
+  return (
+    <div className="md:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex w-full items-center justify-between rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
+      >
+        <span className="font-medium">Filter categories</span>
+        <span className="flex items-center gap-2 text-xs text-neutral-600">
+          {anySelected ? `${selected.length} selected` : "None"}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            className={`transition ${open ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          >
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+          </svg>
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-lg">
+          <div className="mb-2 flex items-center justify-between text-xs text-neutral-600">
+            <span>{tags.length} categories</span>
+            {anySelected && (
+              <button onClick={onClear} className="underline">Clear</button>
+            )}
+          </div>
+          <ul className="space-y-2">
+            {tags.map((t) => {
+              const checked = selected.some((x) => slug(x) === slug(t));
+              const id = `tag-${slug(t)}`;
+              return (
+                <li key={t}>
+                  <label htmlFor={id} className="flex items-center gap-2">
+                    <input
+                      id={id}
+                      type="checkbox"
+                      className="h-4 w-4 accent-black"
+                      checked={checked}
+                      onChange={() => onToggle(t)}
+                    />
+                    <span className="text-sm">{t}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function NounsDirectory() {
@@ -94,115 +259,45 @@ export default function NounsDirectory() {
   useEffect(() => {
     let aborted = false;
 
-    async function fetchText(url) {
-      const r = await fetch(url, { cache: "no-store" });
-      const t = await r.text();
-      return { ok: r.ok, text: t };
-    }
-
     async function load() {
-      setLoading(true);
-      setError("");
-      setDebugSnippet("");
-      setDebugFields([]);
-
-      // 1) HTML via proxy (preferred; your HTML endpoint is stable)
       try {
-        const r0 = await fetchText(`${CONFIG.PROXY_URL}?url=${encodeURIComponent(CONFIG.SHEET_HTML_URL)}`);
-        if (r0.ok) {
-          const parsed = parsePublishedHtml(r0.text);
-          if (parsed.fields.length) {
-            if (aborted) return;
-            setDebugFields(parsed.fields);
-            const cols = resolveColumns(parsed.fields, CONFIG.COLUMNS);
-            const data = parsed.rows.map((row, i) => {
-              const titleRaw = (cols.title && row[cols.title]) || "";
-              const link = (cols.link && row[cols.link]) || "";
-              const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
-              const description = String((cols.description && row[cols.description]) || "").trim();
-              const categories = parseList(cols.categories ? row[cols.categories] : "");
-              const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-              const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
-              const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-              const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-              const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-              const image = logoUrl || legacyLogo || derivedLogo;
-              return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-            });
-            setRows(data);
-            setLoading(false);
-            return;
-          } else {
-            setDebugSnippet(r0.text.slice(0,200));
-          }
+        const r = await fetch(CONFIG.SHEET_HTML_URL, { cache: "no-store" });
+        const text = await r.text();
+        if (!r.ok) throw new Error("pubhtml returned non-200");
+        const parsed = parsePublishedHtml(text);
+        if (!parsed.fields.length) {
+          setDebugSnippet(text.slice(0,200));
+          throw new Error("pubhtml parse: no headers");
         }
-      } catch {}
+        const cols = resolveColumns(parsed.fields, CONFIG.COLUMNS);
+        setDebugFields(parsed.fields);
 
-      // 2) CSV via proxy
-      try {
-        const csvUrl = CONFIG.SHEET_CSV_URL; // allow CDN caching
-        const r1 = await fetchText(`${CONFIG.PROXY_URL}?url=${encodeURIComponent(csvUrl)}`);
-        if (r1.ok && !/^\s*</.test(r1.text)) {
-          const parsed = Papa.parse(r1.text, { header: true, skipEmptyLines: true });
-          const fields = parsed.meta?.fields || Object.keys(parsed.data?.[0] || {});
-          if (fields.length) {
-            if (aborted) return;
-            setDebugFields(fields);
-            const cols = resolveColumns(fields, CONFIG.COLUMNS);
-            const data = (parsed.data || []).map((row, i) => {
-              const titleRaw = (cols.title && row[cols.title]) || "";
-              const link = (cols.link && row[cols.link]) || "";
-              const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
-              const description = String((cols.description && row[cols.description]) || "").trim();
-              const categories = parseList(cols.categories ? row[cols.categories] : "");
-              const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-              const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
-              const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-              const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-              const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-              const image = logoUrl || legacyLogo || derivedLogo;
-              return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-            });
-            setRows(data);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
+        const data = parsed.rows.map((row, i) => {
+          const titleRaw = (cols.title && row[cols.title]) || "";
+          const link = (cols.link && row[cols.link]) || "";
+          const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
+          const description = String((cols.description && row[cols.description]) || "").trim();
 
-      // 3) CSV direct
-      try {
-        const r2 = await fetchText(CONFIG.SHEET_CSV_URL);
-        if (r2.ok && !/^\s*</.test(r2.text)) {
-          const parsed = Papa.parse(r2.text, { header: true, skipEmptyLines: true });
-          const fields = parsed.meta?.fields || Object.keys(parsed.data?.[0] || {});
-          if (fields.length) {
-            if (aborted) return;
-            setDebugFields(fields);
-            const cols = resolveColumns(fields, CONFIG.COLUMNS);
-            const data = (parsed.data || []).map((row, i) => {
-              const titleRaw = (cols.title && row[cols.title]) || "";
-              const link = (cols.link && row[cols.link]) || "";
-              const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
-              const description = String((cols.description && row[cols.description]) || "").trim();
-              const categories = parseList(cols.categories ? row[cols.categories] : "");
-              const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-              const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
-              const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-              const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-              const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-              const image = logoUrl || legacyLogo || derivedLogo;
-              return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-            });
-            setRows(data);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch {}
+          const categories = parseList(cols.categories ? row[cols.categories] : "");
+          const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
+          const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
 
-      setError("We couldn’t parse either the HTML or CSV for this sheet right now. Please try a refresh, or share the /export?format=csv link and I’ll wire that in.");
-      setLoading(false);
+          const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
+          const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
+          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+          const image = logoUrl || legacyLogo || derivedLogo;
+
+          return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
+        });
+
+        if (aborted) return;
+        setRows(data);
+        setLoading(false);
+      } catch (e) {
+        if (aborted) return;
+        setError("Could not parse the published HTML table from Google. Open details for a peek at what we received.");
+        setLoading(false);
+      }
     }
 
     load();
