@@ -1,12 +1,13 @@
-// v31 (reissued):
-// - Load sheet via Vercel proxy (/api/sheet-proxy?url=...) to avoid CORS/rate limits.
-// - Error UI if parsing fails.
+// v34 — CSV + HTML fallback
+// If CSV (publish/export) fails, we fetch the published HTML table and parse it.
+// Still tries proxy first, then direct; then HTML via proxy, then direct.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 
 const CONFIG = {
   SHEET_CSV_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pub?gid=0&single=true&output=csv",
+  SHEET_HTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT2QEJ1rF958d-HWyfhuCMGVjBCIxED4ACRBCLtGw1yAzYON0afVFXxY_YOHhRjHVwGvOh7zpMyaRs7/pubhtml?gid=0&single=true",
   PROXY_URL: "/api/sheet-proxy",
   COLUMNS: {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
@@ -196,52 +197,187 @@ export default function NounsDirectory() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugSnippet, setDebugSnippet] = useState("");
+  const [debugFields, setDebugFields] = useState([]);
   const [selectedTags, setSelectedTags] = useState([]);
   const [query, setQuery] = useState("");
 
   const containerRef = useRef(null);
 
   useEffect(() => {
-    const url = `${CONFIG.PROXY_URL}?url=${encodeURIComponent(CONFIG.SHEET_CSV_URL)}`;
-    Papa.parse(url, {
-      header: true,
-      download: true,
-      skipEmptyLines: true,
-      complete: (res) => {
+    async function load() {
+      setLoading(true);
+      setError("");
+      setDebugSnippet("");
+      setDebugFields([]);
+
+      const tryParseCsv = (text) => {
+        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+        const rows = parsed.data || [];
+        const fields = parsed.meta && parsed.meta.fields ? parsed.meta.fields : Object.keys(rows[0] || {});
+        return { rows, fields };
+      };
+
+      const sniffHtml = (text) => /^\s*</.test(text) && /<html/i.test(text);
+
+      function parsePublishedHtml(text) {
         try {
-          const raw = res.data || [];
-          const fields = (res.meta && res.meta.fields) || Object.keys(raw[0] || {});
-          if (!fields.length) throw new Error("No columns detected");
-          const cols = resolveColumns(fields, CONFIG.COLUMNS);
-          const data = raw.map((row, i) => {
-            const titleRaw = (cols.title && row[cols.title]) || "";
-            const link = (cols.link && row[cols.link]) || "";
-            const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
-            const description = String((cols.description && row[cols.description]) || "").trim();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(text, "text/html");
+          let table = doc.querySelector("table.waffle");
+          if (!table) table = doc.querySelector("table");
+          if (!table) return { rows: [], fields: [], hrefMaps: [] };
 
-            const categories = parseList(cols.categories ? row[cols.categories] : "");
-            const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
-            const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
+          const trs = Array.from(table.querySelectorAll("tr"));
+          const dataRows = [];
+          const hrefMaps = [];
 
-            const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
-            const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
-            const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
-            const image = logoUrl || legacyLogo || derivedLogo;
+          for (const tr of trs) {
+            const tds = Array.from(tr.querySelectorAll("td"));
+            if (!tds.length) continue;
 
-            return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
-          });
-          setRows(data);
-          setLoading(false);
+            const rowVals = tds.map((td) => (td.textContent || "").replace(/\s+/g, " ").trim());
+            const rowHrefs = tds.map((td) => {
+              const a = td.querySelector("a[href]");
+              return a ? a.getAttribute("href") || "" : "";
+            });
+
+            if (rowVals.every((v) => v === "")) continue;
+
+            dataRows.push(rowVals);
+            hrefMaps.push(rowHrefs);
+          }
+
+          if (!dataRows.length) return { rows: [], fields: [], hrefMaps: [] };
+
+          const headers = dataRows[0].map((h, i) => h || `col_{i}`);
+          const out = [];
+          const outHrefMaps = [];
+          for (let i = 1; i < dataRows.length; i++) {
+            const obj = {};
+            headers.forEach((h, idx) => (obj[h] = dataRows[i][idx] ?? ""));
+            out.push(obj);
+
+            const hrefObj = {};
+            headers.forEach((h, idx) => (hrefObj[h] = hrefMaps[i][idx] ?? ""));
+            outHrefMaps.push(hrefObj);
+          }
+
+          return { rows: out, fields: headers, hrefMaps: outHrefMaps };
         } catch (e) {
-          setError("We couldn't read the sheet. It might be unpublished or rate-limited. Try reloading in a minute.");
-          setLoading(false);
+          return { rows: [], fields: [], hrefMaps: [] };
         }
-      },
-      error: () => {
-        setError("Network error while loading the sheet.");
+      }
+
+      async function fetchText(url) {
+        const r = await fetch(url, { cache: "no-store" });
+        const t = await r.text();
+        return { ok: r.ok, text: t };
+      }
+
+      let text = "";
+      let ok = false;
+
+      // CSV via proxy with cache-buster
+      try {
+        const buster = `cb=${Date.now()}`;
+        const csvUrl = CONFIG.SHEET_CSV_URL + (CONFIG.SHEET_CSV_URL.includes("?") ? "&" : "?") + buster;
+        const r1 = await fetchText(`${CONFIG.PROXY_URL}?url=${encodeURIComponent(csvUrl)}`);
+        if (r1.ok && !sniffHtml(r1.text)) {
+          text = r1.text; ok = true;
+        }
+      } catch {}
+
+      // CSV direct fallback
+      if (!ok) {
+        try {
+          const r2 = await fetchText(CONFIG.SHEET_CSV_URL);
+          if (r2.ok && !sniffHtml(r2.text)) { text = r2.text; ok = true; }
+        } catch {}
+      }
+
+      // HTML via proxy as last-resort
+      if (!ok) {
+        try {
+          const r3 = await fetchText(`${CONFIG.PROXY_URL}?url=${encodeURIComponent(CONFIG.SHEET_HTML_URL)}`);
+          if (r3.ok) {
+            const parsed = parsePublishedHtml(r3.text);
+            if (parsed.fields.length) {
+              // Convert to row objects using detected columns
+              const fields = parsed.fields;
+              setDebugFields(fields);
+              const cols = resolveColumns(fields, CONFIG.COLUMNS);
+              const raw = parsed.rows;
+              const data = raw.map((row, i) => {
+                const titleRaw = (cols.title && row[cols.title]) || "";
+                let link = (cols.link && row[cols.link]) || "";
+                // Try to extract a link from the HTML table if URL column was empty
+                // (titles are sometimes hyperlinks in pubhtml).
+                // We can't pass hrefMaps here (kept simple), but typical sheets have URL column populated.
+                const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
+                const description = String((cols.description && row[cols.description]) || "").trim();
+
+                const categories = parseList(cols.categories ? row[cols.categories] : "");
+                const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
+                const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
+
+                const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
+                const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
+                const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+                const image = logoUrl || legacyLogo || derivedLogo;
+
+                return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
+              });
+
+              setRows(data);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch {}
+      }
+
+      if (!ok) {
+        setError("Google is returning an error for the CSV endpoint (400). We tried proxy, direct, and HTML fallback.");
+        return setLoading(false);
+      }
+
+      try {
+        const { rows: raw, fields } = tryParseCsv(text);
+        if (!fields.length) throw new Error("No header row detected.");
+        setDebugFields(fields);
+
+        const cols = resolveColumns(fields, CONFIG.COLUMNS);
+
+        const data = raw.map((row, i) => {
+          const titleRaw = (cols.title && row[cols.title]) || "";
+          const link = (cols.link && row[cols.link]) || "";
+          const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)).trim();
+          const description = String((cols.description && row[cols.description]) || "").trim();
+
+          const categories = parseList(cols.categories ? row[cols.categories] : "");
+          const cardCategories = parseList(cols.cardCategories ? row[cols.cardCategories] : "");
+          const hidden = parseList(cols.hiddenTags ? row[cols.hiddenTags] : "");
+
+          const logoUrl = String((cols.logoUrl && row[cols.logoUrl]) || "").trim();
+          const legacyLogo = String((cols.image && row[cols.image]) || "").trim();
+          const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
+          const image = logoUrl || legacyLogo || derivedLogo;
+
+          return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
+        });
+
+        setRows(data);
         setLoading(false);
-      },
-    });
+      } catch (e) {
+        setError("We retrieved CSV but couldn't parse it. Check column names/formatting.");
+        setDebugSnippet((text || "").slice(0, 200));
+        setLoading(false);
+      }
+    }
+
+    load();
   }, []);
 
   const allFilterTags = useMemo(() => {
@@ -304,8 +440,9 @@ export default function NounsDirectory() {
                 placeholder="Search resources…"
                 className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
                 aria-label="Search"
+                name="q" id="q"
               />
-              {selectedTags.length > 0 and (
+              {selectedTags.length > 0 && (
                 <button
                   onClick={clearFilters}
                   className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
@@ -316,13 +453,22 @@ export default function NounsDirectory() {
             </div>
           </div>
 
-          {error and (
+          {error && (
             <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
               {error}{" "}
-              <span className="block text-xs text-amber-800 mt-1">
-                Quick checks: Ensure the sheet is still <em>Published to the web</em>, the link hasn&apos;t changed, and column headers match
-                <code className="mx-1">Category</code> / <code className="mx-1">Card Categories</code> / <code className="mx-1">URL</code> / <code className="mx-1">Description</code>.
-              </span>
+              <button
+                className="ml-2 underline"
+                onClick={() => setDebugOpen((v) => !v)}
+              >
+                {debugOpen ? "Hide details" : "Show details"}
+              </button>
+              {debugOpen && (
+                <div className="mt-2 rounded bg-white p-2 text-xs text-neutral-700">
+                  <div><strong>First 200 chars:</strong></div>
+                  <pre className="whitespace-pre-wrap break-words">{debugSnippet}</pre>
+                  <div className="mt-2"><strong>Detected columns:</strong> {debugFields.join(", ") || "(none)"}</div>
+                </div>
+              )}
             </div>
           )}
 
@@ -400,7 +546,7 @@ export default function NounsDirectory() {
 
                   <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
 
-                  {!!(r.cardCategories && r.cardCategories.length) and (
+                  {!!(r.cardCategories && r.cardCategories.length) && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.cardCategories.map((cc) => (
                         <span
@@ -413,7 +559,7 @@ export default function NounsDirectory() {
                     </div>
                   )}
 
-                  {r.link and (
+                  {r.link && (
                     <div className="mt-auto pt-4 flex justify-end">
                       <a
                         href={r.link}
