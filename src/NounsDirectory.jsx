@@ -1,5 +1,6 @@
-// v39 — Local CSV only: fetches /resources.csv (no proxy), clearer errors.
-// If /resources.csv 404s, you’ll see a big message and the 1st 200 chars of the response.
+// v40 — Desktop categories dropdown (multi-select) + existing mobile dropdown.
+// Replaces the desktop pill grid with a compact dropdown next to the search.
+// Keeps local /public/resources.csv loader (no Google Sheets dependency).
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
@@ -10,8 +11,8 @@ const CONFIG = {
     title: ["Name (with url hyperlinked)", "Name", "Title"],
     link: ["URL", "Link"],
     description: ["Description", "About"],
-    categories: ["Category"],
-    cardCategories: ["Card Categories", "Card categories"],
+    categories: ["Category"], // used for FILTERS
+    cardCategories: ["Card Categories", "Card categories"], // shown as chips on CARDS
     hiddenTags: ["Hidden tags", "Hidden Tags", "Search tags", "Search Keywords"],
     logoUrl: ["Logo URL", "Logo url", "Image URL"],
     image: ["Logo", "Image"]
@@ -45,7 +46,12 @@ const CONFIG = {
 };
 
 const slug = (s) =>
-  (s || "").toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+  (s || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
 
 const parseList = (val) =>
   (val || "")
@@ -70,7 +76,7 @@ function resolveColumns(fields, candidatesMap) {
     cardCategories: pick(candidatesMap.cardCategories),
     hiddenTags: pick(candidatesMap.hiddenTags),
     logoUrl: pick(candidatesMap.logoUrl),
-    image: pick(candidatesMap.image)
+    image: pick(candidatesMap.image),
   };
 }
 
@@ -93,10 +99,12 @@ function Disclaimer() {
           i
         </button>
         <div
-          className={`absolute right-0 top-full mt-2 w-80 rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-800 shadow-lg transition ${open ? "opacity-100 scale-100" : "pointer-events-none opacity-0 scale-95"}`}
+          className={`absolute right-0 top-full mt-2 w-80 rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-800 shadow-lg transition ${
+            open ? "opacity-100 scale-100" : "pointer-events-none opacity-0 scale-95"
+          }`}
         >
-          <strong>Warning.</strong> Links lead off of nouns.world. Please make sure to do your own research
-          and only click links or connect to websites you trust.
+          <strong>Warning.</strong> Links lead off of nouns.world. Please make sure to do your own
+          research and only click links or connect to websites you trust.
         </div>
       </div>
     </div>
@@ -138,20 +146,7 @@ function Header() {
   );
 }
 
-const Pill = ({ children, selected, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`w-full rounded-2xl px-3 py-2 text-sm transition ${
-      selected
-        ? "border-2 border-black bg-black text-white shadow"
-        : "border-2 border-black bg-white text-black hover:bg-neutral-50"
-    }`}
-  >
-    <span className="truncate">{children}</span>
-  </button>
-);
-
+// Mobile dropdown filters (unchanged)
 function MobileFilters({ tags, selected, onToggle, onClear }) {
   const [open, setOpen] = useState(false);
   const anySelected = selected.length > 0;
@@ -173,7 +168,7 @@ function MobileFilters({ tags, selected, onToggle, onClear }) {
             className={`transition ${open ? "rotate-180" : ""}`}
             aria-hidden="true"
           >
-            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/>
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
           </svg>
         </span>
       </button>
@@ -182,9 +177,7 @@ function MobileFilters({ tags, selected, onToggle, onClear }) {
         <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between text-xs text-neutral-600">
             <span>{tags.length} categories</span>
-            {anySelected && (
-              <button onClick={onClear} className="underline">Clear</button>
-            )}
+            {anySelected && <button onClick={onClear} className="underline">Clear</button>}
           </div>
           <ul className="space-y-2">
             {tags.map((t) => {
@@ -212,11 +205,87 @@ function MobileFilters({ tags, selected, onToggle, onClear }) {
   );
 }
 
+// Desktop dropdown filters
+function DesktopFilters({ tags, selected, onToggle, onClear }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const anySelected = selected.length > 0;
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  return (
+    <div className="relative hidden md:block" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
+      >
+        <span className="font-medium">Filter categories</span>
+        <span className="text-xs text-neutral-600">
+          {anySelected ? `${selected.length} selected` : "None"}
+        </span>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          className={`transition ${open ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        >
+          <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 z-40 mt-2 w-80 max-h-80 overflow-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-2xl">
+          <div className="mb-2 flex items-center justify-between text-xs text-neutral-600">
+            <span>{tags.length} categories</span>
+            {anySelected ? <button onClick={onClear} className="underline">Clear</button> : null}
+          </div>
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {tags.map((t) => {
+              const checked = selected.some((x) => slug(x) === slug(t));
+              const id = `desk-tag-${slug(t)}`;
+              return (
+                <li key={t}>
+                  <label htmlFor={id} className="flex items-center gap-2">
+                    <input
+                      id={id}
+                      type="checkbox"
+                      className="h-4 w-4 accent-black"
+                      checked={checked}
+                      onChange={() => onToggle(t)}
+                    />
+                    <span className="text-sm">{t}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NounsDirectory() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [debugOpen, setDebugOpen] = useState(false);
   const [debugSnippet, setDebugSnippet] = useState("");
   const [debugFields, setDebugFields] = useState([]);
   const [selectedTags, setSelectedTags] = useState([]);
@@ -237,12 +306,14 @@ export default function NounsDirectory() {
         const r = await fetch(CONFIG.SHEET_CSV_URL, { cache: "no-store" });
         const text = await r.text();
         if (!r.ok) {
-          setDebugSnippet(text.slice(0,200));
+          setDebugSnippet(text.slice(0, 200));
           throw new Error("CSV fetch returned non-200 status: " + r.status);
         }
         if (/^\s*</.test(text)) {
-          setDebugSnippet(text.slice(0,200));
-          throw new Error("Expected CSV but got HTML (are you sure /public/resources.csv exists in the deployed build?)");
+          setDebugSnippet(text.slice(0, 200));
+          throw new Error(
+            "Expected CSV but got HTML (are you sure /public/resources.csv exists in the deployed build?)"
+          );
         }
         const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
         const fields = parsed.meta?.fields || Object.keys(parsed.data?.[0] || {});
@@ -255,7 +326,9 @@ export default function NounsDirectory() {
         const data = (parsed.data || []).map((row, i) => {
           const titleRaw = (cols.title && row[cols.title]) || "";
           const link = (cols.link && row[cols.link]) || "";
-          const title = String(titleRaw || (link ? new URL(link).hostname.replace(/^www\./,"") : `Untitled ${i+1}`)).trim();
+          const title = String(
+            titleRaw || (link ? new URL(link).hostname.replace(/^www\./, "") : `Untitled ${i + 1}`)
+          ).trim();
           const description = String((cols.description && row[cols.description]) || "").trim();
 
           const categories = parseList(cols.categories ? row[cols.categories] : "");
@@ -267,7 +340,16 @@ export default function NounsDirectory() {
           const derivedLogo = title ? `/logos/${slug(title)}.png` : "";
           const image = logoUrl || legacyLogo || derivedLogo;
 
-          return { key: `${slug(title)}-${i}`, title, link, description, categories, cardCategories, hiddenTags: hidden, image };
+          return {
+            key: `${slug(title)}-${i}`,
+            title,
+            link,
+            description,
+            categories,
+            cardCategories,
+            hiddenTags: hidden,
+            image,
+          };
         });
 
         setRows(data);
@@ -280,7 +362,9 @@ export default function NounsDirectory() {
     }
 
     load();
-    return () => { aborted = true; };
+    return () => {
+      aborted = true;
+    };
   }, []);
 
   const allFilterTags = useMemo(() => {
@@ -303,8 +387,10 @@ export default function NounsDirectory() {
           r.description,
           ...(r.categories || []),
           ...(r.cardCategories || []),
-          ...(r.hiddenTags || [])
-        ].join(" | ").toLowerCase();
+          ...(r.hiddenTags || []),
+        ]
+          .join(" | ")
+          .toLowerCase();
         return haystack.includes(q);
       });
     }
@@ -331,13 +417,15 @@ export default function NounsDirectory() {
       <div ref={containerRef} className="relative mx-auto max-w-6xl px-4">
         <div className="relative z-10 pb-24">
           <p className="mx-auto mt-5 max-w-3xl text-center text-base md:text-xl leading-relaxed text-neutral-800">
-            <strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its <strong>community</strong>.
-            They expand and maintain it with new <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
-            Learn, find art or developer resources, and explore different areas of Nouns through the <strong>categories below</strong>.
+            <strong>Nouns</strong> is a <strong>decentralized</strong> project, driven by its{" "}
+            <strong>community</strong>. They expand and maintain it with new{" "}
+            <strong>technology</strong>, <strong>tools</strong>, and <strong>resources</strong>.
+            Learn, find art or developer resources, and explore different areas of Nouns through the{" "}
+            <strong>categories below</strong>.
           </p>
 
+          {/* Search + desktop dropdown + clear */}
           <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="sr-only">Explore Nounish Projects</div>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 value={query}
@@ -345,19 +433,30 @@ export default function NounsDirectory() {
                 placeholder="Search resources…"
                 className="w-full max-w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-900 sm:w-72"
                 aria-label="Search"
-                name="q" id="q"
+                name="q"
+                id="q"
               />
+
+              {/* Desktop dropdown */}
+              <DesktopFilters
+                tags={allFilterTags}
+                selected={selectedTags}
+                onToggle={toggleTag}
+                onClear={clearFilters}
+              />
+
               {selectedTags.length > 0 && (
                 <button
                   onClick={clearFilters}
                   className="rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
                 >
-                  Clear filters
+                  Clear
                 </button>
               )}
             </div>
           </div>
 
+          {/* Mobile dropdown filters */}
           <div className="mt-3 md:hidden">
             <MobileFilters
               tags={allFilterTags}
@@ -365,18 +464,6 @@ export default function NounsDirectory() {
               onToggle={toggleTag}
               onClear={clearFilters}
             />
-          </div>
-
-          <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 md:grid">
-            {allFilterTags.map((t) => (
-              <Pill
-                key={t}
-                selected={selectedTags.some((x) => slug(x) === slug(t))}
-                onClick={() => toggleTag(t)}
-              >
-                {t}
-              </Pill>
-            ))}
           </div>
 
           <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
@@ -391,7 +478,7 @@ export default function NounsDirectory() {
               {error}
               {debugSnippet && (
                 <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 text-xs text-neutral-700">
-{debugSnippet}
+                  {debugSnippet}
                 </pre>
               )}
             </div>
@@ -406,8 +493,13 @@ export default function NounsDirectory() {
                   key={r.key}
                   className="group flex h-full flex-col rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm transition hover:shadow-md"
                 >
+                  {/* Header: logo + Title */}
                   <div className="flex items-center gap-3">
-                    <div className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${r.image ? "bg-neutral-100" : "bg-black"}`}>
+                    <div
+                      className={`h-[30px] w-[30px] shrink-0 overflow-hidden rounded ${
+                        r.image ? "bg-neutral-100" : "bg-black"
+                      }`}
+                    >
                       {r.image ? (
                         <img
                           src={r.image}
@@ -441,8 +533,10 @@ export default function NounsDirectory() {
                     </h3>
                   </div>
 
+                  {/* Description */}
                   <p className="mt-3 text-sm text-neutral-700">{r.description}</p>
 
+                  {/* Card chips from "Card Categories" */}
                   {!!(r.cardCategories && r.cardCategories.length) && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.cardCategories.map((cc) => (
@@ -456,6 +550,7 @@ export default function NounsDirectory() {
                     </div>
                   )}
 
+                  {/* Explore link */}
                   {r.link && (
                     <div className="mt-auto pt-4 flex justify-end">
                       <a
@@ -484,7 +579,10 @@ function FixedViewportArt() {
 
   useEffect(() => {
     const build = () => {
-      const set = window.innerWidth >= CONFIG.site.art.breakpoint ? CONFIG.site.art.desktop : CONFIG.site.art.mobile;
+      const set =
+        window.innerWidth >= CONFIG.site.art.breakpoint
+          ? CONFIG.site.art.desktop
+          : CONFIG.site.art.mobile;
       setItems(set);
     };
     build();
@@ -500,10 +598,10 @@ function FixedViewportArt() {
         const style = {
           width: it.size + "px",
           height: it.size + "px",
-          top: it.topVH != null ? `calc(${it.topVH}vh - ${it.size/2}px)` : undefined,
-          left: it.leftVW != null ? `calc(${it.leftVW}vw - ${it.size/2}px)` : undefined,
-          right: it.rightVW != null ? `calc(${it.rightVW}vw - ${it.size/2}px)` : undefined,
-          opacity: CONFIG.site.art.opacity
+          top: it.topVH != null ? `calc(${it.topVH}vh - ${it.size / 2}px)` : undefined,
+          left: it.leftVW != null ? `calc(${it.leftVW}vw - ${it.size / 2}px)` : undefined,
+          right: it.rightVW != null ? `calc(${it.rightVW}vw - ${it.size / 2}px)` : undefined,
+          opacity: CONFIG.site.art.opacity,
         };
         return (
           <img
