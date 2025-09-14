@@ -115,7 +115,7 @@ function Header() {
   const stick = CONFIG.site.stickyHeader;
   return (
     <div className={`${stick ? "sticky top-0" : ""} z-30 w-full bg-black text-white`}>
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+      <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden">
             <img
