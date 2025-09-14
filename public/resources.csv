@@ -1,13 +1,14 @@
 Name,URL,Description,Category,Card Categories,Hidden tags,Logo URL
 Nouns.World,https://nouns.world,"Welcome to Nouns! Dive into Nouns with an overview on the project, links to resources and articles on past completed  projects.",Learn,"Learn, Explore, Intro to Nouns",,
 Nouns.World/explore,https://nouns.world/explore,Explore articles on completed Nouns proposals.,Learn,"Learn, Explore, Blog",,
-Nouns Camp,https://www.nouns.camp/,Streamline governance interface for voters and proposers that also offers a clean interface for bidding on Nouns auctions.,"Governance, Auction","Governance, Topics, Auction, Community",,
 Nouns.wtf,https://nouns.wtf/,The original Nouns frontend. Some aspects of this site are deprecated. No client incentives are rewarded when bidding through this site.,"Governance, Auction, Art","OG, Governance, Auction, Art, Playground, Nouns Explorer",,
+Nouns Camp,https://www.nouns.camp/,Streamline governance interface for voters and proposers that also offers a clean interface for bidding on Nouns auctions.,"Governance, Auction","Governance, Topics, Auction, Community",,
 Nouns.Game,https://www.nouns.game/,"Play Nouns at Nouns.Game, an action packed client with “quick vote” and expanding feature set including 'Crystal Ball' and the ability to bid on auctions.","Governance, Auction, Noun O'Clock","Governance, Auction, Noun O'Clock, NOC, Crystal Ball",,
 Noun O Clock,https://nouns.world/noc,"WTF is Noun O' Clock? Learn about the time between auctions, when the next Noun is selected and the daily auction is celebrated. Join in on NOC everyday, forever.","Learn, Noun O'Clock","Learn, Explore, Noun O'Clock, NOC, Blog",,
 Probe.wtf,https://www.probe.wtf/,"Auction client and Nouns explorer allowing users to find additional details about each Noun, and filter by a variety of variables. ","Auction, Art","Auction, Art, Nouns Explorer",,
 Nouns on X.com,https://x.com/nounsdao,Many Nouners and Nouns contributors are active on X. Make sure to keep up with the official Nouns X account: @nounsdao,Social,"Twitter, Social, Weekly Calls",,
 Nouns on Farcaster,https://farcaster.xyz/~/channel/nouns,"Follow along in /nouns on Farcaster where community members share ideas, updates and more.",Social,"Warpcast, Social",,
+Nouns Community Discord,https://x.com/nounsdao,"In 2022 Nouns shut down their official discord, hosted by the Nouns founders. In 2025 a new Nouns Discord was created by the community, with ownership given to the Nouns DUNA.",Social,"Discord, Social",,
 Nouns Duna Blog,https://paragraph.com/@nouns,"As of March 17th, 2025, Nouns DAO has officially been established as a Wyoming DUNA. Keep up with the official Nouns DUNA blog, hosted by the DUNA Admins.",Learn,"Learn, Blog, Nouns Duna",,
 Nouns.com,https://www.nouns.com/,"Bid, swap, and explore Nouns through Nouns.com, formally Noun Swap. This client allows you to not only bid, but explore Nouns held in the treasury and $nouns pool. ","Governance, Auction, Learn","Governance, Auction, Learn, Intro to Nouns, Swap",,
 Noun Space,https://www.nounspace.com/home,Nounish hub and homepage for builders to create and customize their profile with interchangeable widgets.,"Community, Community Tool, Social","Community, Community Tool, Social",,
@@ -56,7 +57,6 @@ Nouns Builders,https://nouns.builders/,A visual and interactive Nouns DAO projec
 Palettes.wtf,https://www.palettes.wtf/,"An exploration of color theory based on the official Nouns color palette, created to inspire designers and builders in and outside of the Nouns ecosystem 🎨",Art,Art,,
 Nouns Canvas,https://www.nounscanvas.xyz/,A repository of Nounish design resources. This site compiles multiple sources you can use to start designing with Nouns.,Art,Art,,
 Nouns Coloring Book,https://www.amazon.com/stores/Nounsense-Books/author/B0D48BGXR9,A series of Nouns coloring books produced by community member Messup! Fun for anyone 🎨,Merchandise,Merchandise,,
-Nouns Community Discord,https://x.com/nounsdao,"In 2022 Nouns shut down their official discord, hosted by the Nouns founders. In 2025 a new Nouns Discord was created by the community, with ownership given to the Nouns DUNA.",Social,"Discord, Social",,
 Nouns Draws on Farcaster,https://warpcast.com/~/channel/nouns-draws,A channel dedicated to Nouns illustrators on Farcaster.,Social,"Warpcast, Social",,
 Nouns Fest,https://nounsfest.com/,Nounish Animation Fest in collaboration with Stoopid Buddy and dozens of other talented artists. Check out their merch!,"Art, Animation, Community, Event","Art, Animation, Community, Event, Merchandise",,
 Nouns Figma,https://www.figma.com/community/file/1280649696072601487/nounish-traits,Figma file with all of the Nouns traits split up by category.,"Art, Traits","Art, Traits",,
@@ -87,6 +87,7 @@ The Nominal Hero,https://www.amazon.com/Nominal-Hero-Tasha-K-Rookswater/dp/B0CXR
 Uplink.wtf,https://uplink.wtf/,"Mintboards. A multiplayer canvas for onchain creation. Add your community and use Uplink, a Nouns funded tool, to host contests and more.",Community Tool,Community Tool,,
 Verbs Blog,https://mirror.xyz/verbsteam.eth,"Verbs is a development duo led by David and Elad, two prominent Nouns contributors funded to maintain and develop the Nouns protocol.",Learn,"Learn, Blog, Thoughts on Nouns",,
 Zero Pod Media,https://www.youtube.com/@zerorights,"Check out The Noun Square’s video interviews and Zero Pod recaps of Nouns to get a great feel for whats been going on in the community. You can also listen to the Zero Pod Podcast on Spotify, here.",Learn,"Learn, Explore, Podcast",,
-
+Kendama.wtf,https://slice.so/slicer/2535,"Nounish Kendamas and more!",Merchandise,Merchandise,,
 3D Nouns,https://3dnouns.com/,"Fun resource that allows users to generate, animate, and export 3D Nouns files! Have fun!",Art,Art,,
+
 
